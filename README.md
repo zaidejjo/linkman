@@ -2,9 +2,9 @@
 
 **Symlinks, without the guesswork.**
 
-`linkman` is a light, fast symlink studio for the terminal: a beautiful dual-pane
-TUI with full mouse support, plus a sharp CLI for scripts. Create, inspect,
-retarget, audit and remove links — safely.
+A light, fast symlink studio for the terminal: a beautiful dual-pane TUI with
+full mouse support, and a sharp CLI for scripts. Create, inspect, retarget,
+audit and remove links — safely.
 
 ```text
   ▌ linkman   symlink studio
@@ -19,47 +19,93 @@ retarget, audit and remove links — safely.
 ╰──────────────────────────────────╯ ╰────────────────────────────╯
 ```
 
-## Why linkman
+## Highlights
 
-- **Two panes, one job.** SOURCE on the left, DEST on the right. Mark files,
-  press `l`, done. No `ln -s` path gymnastics.
-- **Beautifully quiet.** Seven hand-tuned palettes (the slate/mint `black`
-  default, Catppuccin Mocha, Tokyo Night, Dracula, Gruvbox, Everforest and
-  GitHub Light), a real inspector, live status, and dialogs that stay out of
-  your way.
-- **Find anything.** `Ctrl+P` opens a floating fuzzy palette over actions, files
-  and folders from both panes.
-- **Safe by default.** `unlink` only ever removes symlinks. `--force` refuses
-  to replace a real directory. Conflicts ask before overwriting, and the last
-  operation can always be undone — and redone if you undo by accident.
-- **Mouse-native.** Click rows, double-click folders, right-click to mark,
-  scroll the wheel, hit the toolbar, the palette, and dialog buttons.
-- **Small and fast.** No daemon, no database. A single Rust binary that starts
-  instantly.
-- **Yours.** JSON/JSONC config, generated shell completions, and a scriptable
-  CLI with `--json`; `doctor` and `list` exit non-zero when they find problems.
+- **Two panes, one job.** SOURCE left, DEST right. Mark files, press `l`, done
+  — no `ln -s` path gymnastics.
+- **Find anything.** `Ctrl+P` opens a floating fuzzy finder over every action
+  and every file in both panes, grouped into sections.
+- **Safe by default.** `unlink` only ever removes symlinks, `--force` refuses
+  to replace a real directory, conflicts ask first, and everything can be
+  undone (`u`) — and redone (`U`) if you undo by accident.
+- **Seven palettes.** Press `T` to preview and pick a theme live: `black`,
+  Catppuccin Mocha, Tokyo Night, Dracula, Gruvbox, Everforest, GitHub Light.
+- **Mouse-native.** Click, double-click, right-click to mark, scroll, hit the
+  toolbar and every dialog button.
+- **Small and fast.** One Rust binary, no daemon, no database, starts instantly.
 
 ## Install
 
+**Arch Linux (AUR)**
+
 ```sh
-cargo install --path .
-# or
+yay -S linkman-bin        # or: paru -S linkman-bin
+```
+
+**Debian / Ubuntu**
+
+```sh
+sudo apt install ./linkman_<version>_amd64.deb
+```
+
+**Any Linux — static build (no glibc version needed)**
+
+```sh
+gh release download -R zaidejjo/linkman -p 'linkman-*-x86_64-unknown-linux-musl.tar.gz'
+tar -xzf linkman-*-x86_64-unknown-linux-musl.tar.gz
+sudo install -m755 linkman-*/linkman /usr/local/bin/linkman
+```
+
+**macOS**
+
+```sh
+gh release download -R zaidejjo/linkman -p 'linkman-*-apple-darwin.tar.gz'
+tar -xzf linkman-*-apple-darwin.tar.gz
+sudo install -m755 linkman-*/linkman /usr/local/bin/linkman
+```
+
+**With cargo**
+
+```sh
+cargo install --git https://github.com/zaidejjo/linkman linkman
+```
+
+**From source**
+
+```sh
+git clone https://github.com/zaidejjo/linkman && cd linkman
 cargo build --release
 install -m755 target/release/linkman ~/.local/bin/linkman
 ```
 
-## The TUI
+Every release also ships a `.deb`, tarballs for x86_64 glibc and aarch64
+Linux, and a `SHA256SUMS.txt` — grab them from the
+[Releases](https://github.com/zaidejjo/linkman/releases) page.
 
-Run `linkman` with no arguments, or point it at folders:
+Check it worked:
+
+```sh
+linkman --version
+```
+
+## Quick start
 
 ```sh
 linkman                                  # both panes start in the current folder
 linkman tui ~/projects/app --dest ~/bin  # source folder + destination folder
 ```
 
+Pick something in **SOURCE** (`j`/`k` or the mouse), move to where the links
+should live (`Tab` switches panes), press `l`.
+
+The first launch writes a commented starter config to
+`~/.config/linkman/config.jsonc` and tells you about it in the status line.
+
+## The TUI
+
 ### Linking
 
-1. Move to an item in **SOURCE** (use `j`/`k`, arrows, or the mouse).
+1. Move to an item in **SOURCE** (`j`/`k`, arrows, or the mouse).
 2. Optionally press `Space` to mark several items.
 3. Navigate **DEST** to where the links should live (`Tab` switches panes).
 4. Press `l`.
@@ -77,12 +123,11 @@ removed with `x` (never the file they point at).
 
 ### Find anything with Ctrl+P
 
-Press `Ctrl+P` outside a prompt, confirmation or theme picker to open a
+Press `Ctrl+P` outside a prompt, confirmation or the theme picker to open a
 floating fuzzy finder. It searches every action **and every file or folder in
 both panes**. Results are grouped under section headings — `LINKS`,
 `HISTORY`, `VIEW`, `GO`, `LOOK`, `APP`, then `SOURCE` and `DEST` files — and
-sections are ordered by their best match, so a strong hit still comes first.
-Type fragments of a name, a path, or an action description:
+sections are ordered by their best match, so a strong hit still comes first:
 
 ```text
 ╭ Command palette ─────────────────────────────────────────╮
@@ -98,31 +143,23 @@ Type fragments of a name, a path, or an action description:
 `↑↓` or the wheel to move, `Enter` or a click to run, `Esc` to close. Choosing
 a folder opens it; choosing a file reveals and selects it in its pane.
 
-The matcher is fzf-flavoured: word starts outrank the middle of words,
-title matches outrank subtitles, contiguous runs beat scattered letters, and
+The matcher is fzf-flavoured: word starts outrank the middle of words, title
+matches outrank subtitles, contiguous runs beat scattered letters, and
 initials work (`tgrel` → “Toggle relative”). Typing a capital letter makes the
-search case sensitive, so `Link` will not surface `unlink`. Paths shown in both
-panes are listed once.
+search case sensitive, so `Link` will not surface `unlink`.
 
 ### Undo and redo
 
 Every link, retarget and removal in the current session can be undone with `u`
-or `Ctrl+Z`. Undo is deliberately careful:
+or `Ctrl+Z`. Undo is deliberately careful: a link is only removed if it still
+points exactly where linkman put it, backups are restored, removed links are
+recreated with their original raw target (relative stays relative), and
+regular files are never deleted.
 
-- a link is only removed if it still points exactly where linkman put it;
-- backups created during linking are restored;
-- removed links are recreated with their original raw target (relative stays
-  relative);
-- regular files are never deleted, and an externally retargeted link is left
-  untouched.
-
-Because undo is one keystroke away, it is easy to hit it by accident. Press
-`U` or `Ctrl+Y` to redo the operation the undo just reversed. Redo re-checks
-the filesystem too: it will not overwrite a path that has become occupied, it
-only removes a link if it still points where it did when it was removed, and
-it will never clobber a replaced entry that had no backup. Starting a new
-operation clears the redo history. Both directions honour `undo_limit` from
-the config (default 50).
+Hit it by accident? `U` or `Ctrl+Y` redoes it, with the same checks: redo
+never overwrites an occupied path and never removes a changed link. A new
+operation clears the redo history. Both directions honour `undo_limit`
+(default 50).
 
 ### Keys
 
@@ -167,13 +204,64 @@ the config (default 50).
 The footer always keeps `q quit` within reach; the status line shows live
 badges for relative/absolute mode, force, hidden files, and marked items.
 
+### Themes
+
+Press `T` (or `Ctrl+P` → “Choose theme”) to open the picker. Every palette is
+listed wearing its own colours; moving the cursor previews it live across the
+whole TUI, `Enter` keeps it and `Esc` puts the old one back.
+
+| Name | Look |
+| --- | --- |
+| `black` | deep slate + mint · default |
+| `catppuccin-mocha` | mauve pastels on deep indigo |
+| `tokyo-night` | blue-violet night |
+| `dracula` | purple night with vivid green |
+| `gruvbox` | warm retro brown |
+| `everforest` | muted forest green |
+| `github-light` | clean light theme for bright terminals |
+
+The picker's choice lasts for the session — set `"theme"` in the config to
+make it permanent. Aliases such as `mocha`, `tokyonight`, `light` and
+`default` work too; an unknown name falls back to `black` with a warning.
+
+## Config
+
+linkman reads its TUI preferences from JSON **or JSONC** (comments and
+trailing commas are fine):
+
+- `$XDG_CONFIG_HOME/linkman/config.json` / `config.jsonc`
+- `~/.config/linkman/config.json` / `config.jsonc`
+- or an explicit path in `$LINKMAN_CONFIG`
+
+```jsonc
+{
+  // TUI startup defaults
+  "relative": false,
+  "force": false,
+  "show_hidden": false,
+  "undo_limit": 50,        // 1–500
+  "theme": "black",        // see Themes above
+
+  // optional starting folders; CLI arguments always win
+  "source": "~/projects",
+  "dest": "~/bin"
+}
+```
+
+The first TUI launch creates the file for you; after that it is yours —
+linkman never rewrites it. `linkman config --init` writes one from the CLI,
+`linkman config` shows the path and the effective defaults. Unknown keys and
+syntax errors are reported as a warning instead of stopping the TUI. Config
+preferences apply to the TUI; explicit CLI flags always win for CLI
+operations.
+
 ## CLI
 
 ### Create
 
 ```sh
 linkman link ./dist ~/bin/app             # ~/bin/app -> /current/dist
-linkman link ./dist                      # ./dist -> /current/dist
+linkman link ./dist                       # ./dist -> /current/dist
 linkman link ./dist -t ~/bin -r           # ~/bin/dist -> ../dist
 linkman link ./dist -t ~/bin -n app       # custom link name
 ```
@@ -205,31 +293,18 @@ Only symlinks are removed. Regular files and directories are refused.
 
 ```sh
 linkman list ~/bin                   # top-level audit
-linkman list . -r                    # recursive; paths shown relative to DIR
-linkman list ~/bin --json
-linkman info ~/bin/app
-linkman info ~/bin/app --json
+linkman list . -r                    # recursive; paths relative to DIR
+linkman info ~/bin/app               # follow the chain: target, health, perms
+linkman doctor . --json              # find broken links and loops
 ```
 
-`info` follows the link chain, shows the raw and resolved target, health,
-permissions, size, and modification time.
-
-### Health check
-
-```sh
-linkman doctor ~/projects
-linkman doctor . --shallow           # only the top folder
-linkman doctor . --json
-```
-
-Finds broken links and loops. Exit code `1` when issues exist, so it drops
-cleanly into CI:
+`list` and `doctor` exit `1` when they find broken or looped links, so they
+drop cleanly into scripts and CI:
 
 ```sh
 linkman doctor . || echo "fix your links"
+linkman list ~/bin --json | jq '.links[] | select(.status != "ok")'
 ```
-
-`list` also exits `1` when it finds broken or looped links.
 
 ### Global
 
@@ -241,65 +316,8 @@ linkman config --init              # write a commented starter config
 linkman completions bash           # bash, zsh, fish, elvish, powershell
 ```
 
-## Config
-
-linkman reads its TUI preferences from JSON **or JSONC** (comments and
-trailing commas are fine):
-
-- `$XDG_CONFIG_HOME/linkman/config.json`
-- `$XDG_CONFIG_HOME/linkman/config.jsonc`
-- `~/.config/linkman/config.json` / `config.jsonc`
-- or an explicit path in `$LINKMAN_CONFIG`
-
-```jsonc
-{
-  // TUI startup defaults
-  "relative": false,
-  "force": false,
-  "show_hidden": false,
-  "undo_limit": 50,        // 1–500
-  "theme": "black",        // see Themes below
-
-  // optional starting folders; CLI arguments always win
-  "source": "~/projects",
-  "dest": "~/bin"
-}
-```
-
-Create one with `linkman config --init`, or just start the TUI: the first
-launch creates `~/.config/linkman/config.jsonc` for you (and the status line
-says so). An existing file is never overwritten or rewritten — edit it by hand.
-Unknown keys and syntax errors are reported as a warning rather
-than stopping the TUI. Config preferences apply to the TUI; explicit CLI flags
-remain in charge of CLI operations.
-
-## Themes
-
-The TUI ships with seven palettes. `black` is the default: a deep slate canvas
-with mint highlights and amber links.
-
-| Name | Look |
-| --- | --- |
-| `black` | deep slate + mint · default |
-| `catppuccin-mocha` | mauve pastels on deep indigo |
-| `tokyo-night` | blue-violet night |
-| `dracula` | purple night with vivid green |
-| `gruvbox` | warm retro brown |
-| `everforest` | muted forest green |
-| `github-light` | clean light theme for bright terminals |
-
-Press `T` (or open the palette with `Ctrl+P` and pick “Choose theme”) to see
-the whole list in a floating picker. Each row wears its own colours; moving the
-cursor previews that palette live across the whole TUI. `Enter` keeps it and
-`Esc` restores the one you had. The choice lasts for the session — put the name
-in the config to make it permanent:
-
-```jsonc
-{ "theme": "tokyo-night" }
-```
-
-Aliases such as `mocha`, `tokyonight`, `light` and `default` also work. An
-unknown name falls back to `black` with a warning in the status line.
+Every inspection command accepts `--json` and prints stable, pretty-printed
+output.
 
 ## Shell completions
 
@@ -312,103 +330,32 @@ linkman completions zsh > ~/.zfunc/_linkman
 
 # fish
 linkman completions fish > ~/.config/fish/completions/linkman.fish
-
-# PowerShell
-linkman completions powershell | Out-String | Invoke-Expression
 ```
 
-Completions cover every command, alias, and flag.
-
-## JSON
-
-Every inspection command speaks JSON:
-
-```json
-{
-  "path": "/home/me/bin/app",
-  "target": "../projects/app/dist",
-  "resolved": "/home/me/projects/app/dist",
-  "status": "ok",
-  "kind": "dir"
-}
-```
-
-`--json` output is pretty-printed and stable enough for `jq`:
-
-```sh
-linkman doctor . --json | jq '.issues[] | .path'
-linkman list ~/bin --json | jq '.links[] | select(.status != "ok")'
-```
+Completions cover every command, alias and flag — and they are already
+installed for you by the AUR package and the `.deb`.
 
 ## Safety notes
 
 - Removing a link never touches its target.
 - `--force` will not replace a real directory.
 - `--backup` moves the old entry aside instead of deleting it.
-- TUI undo refuses to remove a link that no longer matches what linkman wrote.
-- TUI redo refuses to overwrite an occupied path or remove a changed link.
-- Broken links are first-class: they can be created, listed, found, and fixed.
+- TUI undo refuses to remove a link that no longer matches what linkman wrote;
+  redo refuses to overwrite an occupied path.
+- Broken links are first-class: they can be created, listed, found and fixed.
 - Paths are resolved lexically; nothing is canonicalized behind your back.
 
 ## Development
 
 ```sh
+cargo fmt --all --check
+cargo clippy --all-targets -- -D warnings
 cargo test
-cargo clippy --all-targets
-cargo fmt
 ```
 
-The filesystem engine lives in `src/fsops.rs`; the CLI in `src/cli.rs`; the TUI
-in `src/tui/` (`app` state + `ui` rendering).
-
-## Releases & CI
-
-Two GitHub Actions workflows live in `.github/workflows/`.
-
-**`ci.yml`** — every push and pull request:
-
-1. `cargo fmt --all --check`
-2. `cargo clippy --all-targets --locked -- -D warnings`
-3. `cargo test --locked` plus a release build, on Linux and macOS
-
-**`release.yml`** — triggered by a tag such as `v0.2.0`:
-
-1. **Gate** — the same fmt, clippy and test run first; nothing is published if
-   they fail.
-2. **Build matrix** (`packaging/package.sh`) — every archive contains the
-   binary, `README.md`, `LICENSE` and generated shell completions:
-
-   | Target | Package |
-   | --- | --- |
-   | `x86_64-unknown-linux-gnu` | `.tar.gz` **and** `.deb` |
-   | `x86_64-unknown-linux-musl` | static `.tar.gz` (any distro) |
-   | `aarch64-unknown-linux-gnu` | `.tar.gz` |
-   | `x86_64-apple-darwin` | `.tar.gz` |
-   | `aarch64-apple-darwin` | `.tar.gz` |
-
-3. **Release** — the archives and a `SHA256SUMS.txt` are attached to the
-   GitHub Release for the tag.
-4. **AUR** — `packaging/aur/PKGBUILD` is re-rendered with the new version and
-   the sha256 of the released x86_64 tarball, `.SRCINFO` is regenerated with
-   `makepkg --printsrcinfo`, and both are pushed to the
-   [`linkman-bin`](https://aur.archlinux.org/packages/linkman-bin) package on
-   the AUR.
-
-### Required secret
-
-Add exactly one repository secret under **Settings → Secrets and variables →
-Actions**:
-
-| Secret name | Value |
-| --- | --- |
-| `AUR_SSH_PRIVATE_KEY` | The full private SSH key (ed25519) used to push to the AUR |
-
-Generate it with `ssh-keygen -t ed25519 -f linkman-aur -N ''`, paste the
-**public** key (`linkman-aur.pub`) into your AUR account under *Add SSH
-Public Key*, and paste the **private** key into the secret. The AUR package
-`linkman-bin` has to exist once before the first release (submit the empty
-package on the AUR website); every release after that is updated
-automatically.
+The same checks run on every push and pull request. The filesystem engine
+lives in `src/fsops.rs`, the CLI in `src/cli.rs`, the TUI in `src/tui/`
+(`app` state + `ui` rendering).
 
 ## License
 
