@@ -45,9 +45,50 @@ jobs:
       - name: Tests
         run: cargo test --locked
 
+  completions:
+    name: shell completions
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          rustup set profile minimal
+          rustup toolchain install stable
+          rustup default stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-completions-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-completions-${{ runner.os }}-
+
+      - name: Build the host binary
+        run: cargo build --release --locked
+
+      # Completions only depend on the CLI definition, so they are generated
+      # once on the host and shared — cross-built binaries cannot be executed
+      # on the runner that produced them.
+      - name: Generate completions
+        run: |
+          mkdir -p completions
+          ./target/release/linkman completions bash > completions/linkman.bash
+          ./target/release/linkman completions zsh > completions/_linkman
+          ./target/release/linkman completions fish > completions/linkman.fish
+          ls -l completions
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: completions
+          path: completions/*
+          if-no-files-found: error
+
   build:
     name: build (${{ matrix.target }})
-    needs: check
+    needs: [check, completions]
     strategy:
       fail-fast: false
       matrix:
@@ -99,10 +140,17 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
+      - name: Fetch the shared shell completions
+        uses: actions/download-artifact@v4
+        with:
+          name: completions
+          path: completions
+
       - name: Package
         run: bash packaging/package.sh "${{ matrix.target }}" dist
         env:
           LINKMAN_DEB: ${{ matrix.deb == true && '1' || '0' }}
+          LINKMAN_COMPLETIONS_DIR: ${{ github.workspace }}/completions
 
       - uses: actions/upload-artifact@v4
         with:
