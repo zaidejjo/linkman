@@ -361,6 +361,55 @@ cargo fmt
 The filesystem engine lives in `src/fsops.rs`; the CLI in `src/cli.rs`; the TUI
 in `src/tui/` (`app` state + `ui` rendering).
 
+## Releases & CI
+
+Two GitHub Actions workflows live in `.github/workflows/`.
+
+**`ci.yml`** — every push and pull request:
+
+1. `cargo fmt --all --check`
+2. `cargo clippy --all-targets --locked -- -D warnings`
+3. `cargo test --locked` plus a release build, on Linux and macOS
+
+**`release.yml`** — triggered by a tag such as `v0.2.0`:
+
+1. **Gate** — the same fmt, clippy and test run first; nothing is published if
+   they fail.
+2. **Build matrix** (`packaging/package.sh`) — every archive contains the
+   binary, `README.md`, `LICENSE` and generated shell completions:
+
+   | Target | Package |
+   | --- | --- |
+   | `x86_64-unknown-linux-gnu` | `.tar.gz` **and** `.deb` |
+   | `x86_64-unknown-linux-musl` | static `.tar.gz` (any distro) |
+   | `aarch64-unknown-linux-gnu` | `.tar.gz` |
+   | `x86_64-apple-darwin` | `.tar.gz` |
+   | `aarch64-apple-darwin` | `.tar.gz` |
+
+3. **Release** — the archives and a `SHA256SUMS.txt` are attached to the
+   GitHub Release for the tag.
+4. **AUR** — `packaging/aur/PKGBUILD` is re-rendered with the new version and
+   the sha256 of the released x86_64 tarball, `.SRCINFO` is regenerated with
+   `makepkg --printsrcinfo`, and both are pushed to the
+   [`linkman-bin`](https://aur.archlinux.org/packages/linkman-bin) package on
+   the AUR.
+
+### Required secret
+
+Add exactly one repository secret under **Settings → Secrets and variables →
+Actions**:
+
+| Secret name | Value |
+| --- | --- |
+| `AUR_SSH_PRIVATE_KEY` | The full private SSH key (ed25519) used to push to the AUR |
+
+Generate it with `ssh-keygen -t ed25519 -f linkman-aur -N ''`, paste the
+**public** key (`linkman-aur.pub`) into your AUR account under *Add SSH
+Public Key*, and paste the **private** key into the secret. The AUR package
+`linkman-bin` has to exist once before the first release (submit the empty
+package on the AUR website); every release after that is updated
+automatically.
+
 ## License
 
 MIT

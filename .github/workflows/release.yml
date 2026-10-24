@@ -1,0 +1,211 @@
+name: Release
+
+# Phase 1 (quality gate): fmt → clippy → tests.
+# Phase 2 (tag pushed, e.g. v0.2.0): build every platform, attach the
+# packages to a GitHub Release, then update the AUR package.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: fmt, clippy & tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          rustup set profile minimal
+          rustup toolchain install stable --component rustfmt clippy
+          rustup default stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-release-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-release-${{ runner.os }}-
+
+      - name: rustfmt
+        run: cargo fmt --all --check
+
+      - name: clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Tests
+        run: cargo test --locked
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            deb: true
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          rustup set profile minimal
+          rustup toolchain install stable
+          rustup target add "${{ matrix.target }}"
+          rustup default stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-build-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-build-${{ matrix.target }}-
+
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Install the aarch64 cross linker
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build
+        run: cargo build --release --locked --target "${{ matrix.target }}"
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Package
+        run: bash packaging/package.sh "${{ matrix.target }}" dist
+        env:
+          LINKMAN_DEB: ${{ matrix.deb == true && '1' || '0' }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linkman-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: publish the GitHub release
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          : > SHA256SUMS.txt
+          for file in *.tar.gz *.deb; do
+            if [ -e "$file" ]; then
+              sha256sum "$file" >> SHA256SUMS.txt
+            fi
+          done
+          cat SHA256SUMS.txt
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --title "linkman ${version}" \
+              --generate-notes \
+              dist/*
+          fi
+          gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name'
+
+  aur:
+    name: publish to the AUR
+    needs: release
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install tools
+        run: |
+          pacman -Syu --noconfirm git openssh curl
+          useradd -m builder
+
+      - uses: actions/checkout@v4
+
+      - name: Download the released tarball and hash it
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          curl -fsSL -o /tmp/linkman.tar.gz \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/linkman-${version}-x86_64-unknown-linux-gnu.tar.gz"
+          echo "PKG_SHA256=$(sha256sum /tmp/linkman.tar.gz | cut -d' ' -f1)" >> "$GITHUB_ENV"
+
+      - name: Render the PKGBUILD
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          work="$RUNNER_TEMP/aur"
+          mkdir -p "$work"
+          sed -e "s|@VERSION@|${version}|g" \
+              -e "s|@SHA256@|${PKG_SHA256}|g" \
+              -e "s|@REPO@|${GITHUB_REPOSITORY}|g" \
+              packaging/aur/PKGBUILD > "$work/PKGBUILD"
+          chown -R builder:builder "$work"
+          su -s /bin/bash builder -c "cd '$work' && makepkg --printsrcinfo > .SRCINFO"
+          cat "$work/PKGBUILD" "$work/.SRCINFO"
+
+      - name: Push to the AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [ -z "$AUR_SSH_PRIVATE_KEY" ]; then
+            echo "::error::AUR_SSH_PRIVATE_KEY is not set"
+            exit 1
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%b\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+          git clone ssh://aur@aur.archlinux.org/linkman-bin.git /tmp/aur-repo
+          cp "$RUNNER_TEMP/aur/PKGBUILD" "$RUNNER_TEMP/aur/.SRCINFO" /tmp/aur-repo/
+          cd /tmp/aur-repo
+          git config user.name "linkman CI"
+          git config user.email "zaidejjo@users.noreply.github.com"
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then
+            echo "AUR already up to date for ${version}"
+          else
+            git commit -m "linkman ${version}"
+            git push origin HEAD:master
+          fi
