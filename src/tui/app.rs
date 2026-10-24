@@ -13,6 +13,7 @@ use ratatui::crossterm::event::{
 use super::entry::{self, Entry, EntryKind};
 use super::input::TextInput;
 use super::palette::{PaletteAction, PaletteCommand, PaletteItem, PaletteState};
+use super::theme;
 use super::ui::{ModalAction, ToolbarAction, UiMap};
 use super::undo::{self, CreatedLink, RemovedLink, UndoOp};
 use crate::config::Config;
@@ -133,6 +134,7 @@ pub struct App {
     pub quit: bool,
     pub map: UiMap,
     undo: Vec<UndoOp>,
+    redo: Vec<UndoOp>,
     undo_limit: usize,
     last_click: Option<(Instant, u16, u16)>,
 }
@@ -151,6 +153,7 @@ impl App {
             quit: false,
             map: UiMap::empty(),
             undo: Vec::new(),
+            redo: Vec::new(),
             undo_limit: config.undo_limit.clamp(1, 500),
             last_click: None,
         };
@@ -168,6 +171,8 @@ impl App {
         while self.undo.len() > self.undo_limit {
             self.undo.remove(0);
         }
+        // A brand new action makes the old redo history misleading.
+        self.redo.clear();
     }
 
     // ---------------------------------------------------------------- toasts
@@ -706,24 +711,59 @@ impl App {
             self.set_toast(ToastLevel::Info, "nothing to undo yet");
             return;
         };
-        let label = op.label();
+        self.redo.push(op.clone());
+        self.trim_redo();
         let report = undo::apply(&op);
+        self.after_history_change("undo", op.label(), report);
+    }
+
+    fn redo_last(&mut self) {
+        let Some(op) = self.redo.pop() else {
+            self.set_toast(
+                ToastLevel::Info,
+                "nothing to redo — undo something first (Ctrl+Z)",
+            );
+            return;
+        };
+        let report = undo::reapply(&op);
+        self.undo.push(op.clone());
+        while self.undo.len() > self.undo_limit {
+            self.undo.remove(0);
+        }
+        self.after_history_change("redo", op.label(), report);
+    }
+
+    fn trim_redo(&mut self) {
+        while self.redo.len() > self.undo_limit {
+            self.redo.remove(0);
+        }
+    }
+
+    fn after_history_change(&mut self, verb: &str, label: &str, report: undo::UndoReport) {
         self.load_pane(0, true);
         self.load_pane(1, true);
-
         let mut parts = Vec::new();
         if report.restored > 0 {
-            parts.push(format!(
-                "restored {} link{}",
-                report.restored,
-                if report.restored == 1 { "" } else { "s" }
-            ));
+            parts.push(if verb == "redo" {
+                format!(
+                    "applied {} change{}",
+                    report.restored,
+                    if report.restored == 1 { "" } else { "s" }
+                )
+            } else {
+                format!(
+                    "restored {} link{}",
+                    report.restored,
+                    if report.restored == 1 { "" } else { "s" }
+                )
+            });
         }
         if report.backups > 0 {
             parts.push(format!(
-                "{} backup{} back",
+                "{} backup{} {}",
                 report.backups,
-                if report.backups == 1 { "" } else { "s" }
+                if report.backups == 1 { "" } else { "s" },
+                if verb == "redo" { "recreated" } else { "back" }
             ));
         }
         if report.skipped > 0 {
@@ -734,16 +774,19 @@ impl App {
         }
         if report.errors.is_empty() {
             if parts.is_empty() {
-                self.set_toast(ToastLevel::Info, format!("undo {label}: nothing to change"));
+                self.set_toast(
+                    ToastLevel::Info,
+                    format!("{verb} {label}: nothing to change"),
+                );
             } else {
                 self.set_toast(
                     ToastLevel::Success,
-                    format!("undo {label} · {}", parts.join(" · ")),
+                    format!("{verb} {label} · {}", parts.join(" · ")),
                 );
             }
         } else {
             let detail = report.errors.join(" · ");
-            let mut message = format!("undo {label}");
+            let mut message = format!("{verb} {label}");
             if !parts.is_empty() {
                 message.push_str(&format!(" · {}", parts.join(" · ")));
             }
@@ -783,9 +826,15 @@ impl App {
             ),
             PaletteItem::new(
                 "Undo last operation",
-                "u · link, retarget or remove",
+                "u / Ctrl+Z · link, retarget or remove",
                 "ACTION",
                 Command(PaletteCommand::Undo),
+            ),
+            PaletteItem::new(
+                "Redo undone operation",
+                "U / Ctrl+Y · reapply safely",
+                "ACTION",
+                Command(PaletteCommand::Redo),
             ),
             PaletteItem::new(
                 "Toggle relative links",
@@ -860,6 +909,12 @@ impl App {
                 Command(PaletteCommand::Refresh),
             ),
             PaletteItem::new(
+                "Next theme",
+                format!("palette · currently {}", theme::name()),
+                "LOOK",
+                Command(PaletteCommand::CycleTheme),
+            ),
+            PaletteItem::new(
                 "Show keys & shortcuts",
                 "?",
                 "ACTION",
@@ -873,10 +928,12 @@ impl App {
             ),
         ];
 
+        // Both panes often show the same folder; list each path once.
+        let mut seen = std::collections::HashSet::new();
         for (pane_index, pane) in self.panes.iter().enumerate() {
             let group = if pane_index == 0 { "SOURCE" } else { "DEST" };
             for entry in &pane.entries {
-                if entry.is_parent() {
+                if entry.is_parent() || !seen.insert(entry.path.clone()) {
                     continue;
                 }
                 let mut name = entry.name.clone();
@@ -896,6 +953,11 @@ impl App {
             }
         }
         items
+    }
+
+    fn cycle_theme(&mut self) {
+        let name = theme::cycle();
+        self.set_toast(ToastLevel::Info, format!("theme · {name}"));
     }
 
     fn open_palette(&mut self) {
@@ -1016,6 +1078,8 @@ impl App {
             PaletteCommand::Retarget => self.retarget(),
             PaletteCommand::Remove => self.confirm_remove(),
             PaletteCommand::Undo => self.undo_last(),
+            PaletteCommand::Redo => self.redo_last(),
+            PaletteCommand::CycleTheme => self.cycle_theme(),
             PaletteCommand::ToggleRelative => self.toolbar_action(ToolbarAction::ToggleRelative),
             PaletteCommand::ToggleForce => self.toolbar_action(ToolbarAction::ToggleForce),
             PaletteCommand::ToggleHidden => self.toolbar_action(ToolbarAction::ToggleHidden),
@@ -1298,7 +1362,12 @@ impl App {
                 }
                 KeyCode::Char('d') => self.move_selection(8),
                 KeyCode::Char('u') => self.move_selection(-8),
+                KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                    self.redo_last()
+                }
+                KeyCode::Char('Z') => self.redo_last(),
                 KeyCode::Char('z') => self.undo_last(),
+                KeyCode::Char('y') => self.redo_last(),
                 _ => {}
             }
             return Ok(());
@@ -1359,6 +1428,7 @@ impl App {
             KeyCode::Char('x') | KeyCode::Delete => self.confirm_remove(),
             KeyCode::Char('t') => self.retarget(),
             KeyCode::Char('u') => self.undo_last(),
+            KeyCode::Char('U') => self.redo_last(),
             KeyCode::Char('/') => self.open_prompt(PromptKind::Filter(self.active)),
             KeyCode::Char('~') => self.go_home(),
             KeyCode::Char('1') => self.active = 0,
@@ -1575,6 +1645,7 @@ impl App {
                 ("Space".into(), "mark".into()),
                 ("l".into(), "link".into()),
                 ("u".into(), "undo".into()),
+                ("U".into(), "redo".into()),
                 ("x".into(), "unlink".into()),
                 ("/".into(), "filter".into()),
             ],
@@ -1630,6 +1701,20 @@ mod tests {
 
     fn ctrl(c: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    fn select(app: &mut App, pane: usize, name: &str) {
+        let index = app.panes[pane]
+            .entries
+            .iter()
+            .position(|entry| entry.name == name)
+            .unwrap();
+        let position = app.panes[pane]
+            .visible_indices()
+            .iter()
+            .position(|entry| *entry == index)
+            .unwrap();
+        app.panes[pane].selected = position;
     }
 
     fn click(column: u16, row: u16) -> MouseEvent {
@@ -1772,6 +1857,44 @@ mod tests {
     }
 
     #[test]
+    fn redo_reapplies_and_is_consumed() {
+        let (mut app, _tmp) = fixture();
+        let link = app.panes[1].cwd.join("adir");
+        app.handle_key(key(KeyCode::Char('l'))).unwrap();
+        app.handle_key(ctrl('z')).unwrap();
+        assert!(fs::symlink_metadata(&link).is_err());
+
+        app.handle_key(ctrl('y')).unwrap();
+        assert!(fs::symlink_metadata(&link).is_ok());
+        // Redo is one-shot: nothing is left after it ran.
+        app.handle_key(ctrl('y')).unwrap();
+        assert!(fs::symlink_metadata(&link).is_ok());
+
+        app.active = 1;
+        select(&mut app, 1, "adir");
+        app.handle_key(key(KeyCode::Char('x'))).unwrap();
+        app.handle_key(key(KeyCode::Char('y'))).unwrap();
+        assert!(fs::symlink_metadata(&link).is_err());
+        app.handle_key(key(KeyCode::Char('u'))).unwrap();
+        assert!(fs::symlink_metadata(&link).is_ok());
+        app.handle_key(key(KeyCode::Char('U'))).unwrap();
+        assert!(fs::symlink_metadata(&link).is_err());
+    }
+
+    #[test]
+    fn a_new_action_drops_redo_history() {
+        let (mut app, _tmp) = fixture();
+        let link = app.panes[1].cwd.join("adir");
+        app.handle_key(key(KeyCode::Char('l'))).unwrap();
+        app.handle_key(ctrl('z')).unwrap();
+        assert!(fs::symlink_metadata(&link).is_err());
+
+        app.handle_key(key(KeyCode::Char('l'))).unwrap();
+        app.handle_key(ctrl('y')).unwrap();
+        assert!(fs::symlink_metadata(&link).is_ok());
+    }
+
+    #[test]
     fn palette_finds_actions_and_reveals_files() {
         let (mut app, _tmp) = fixture();
         app.handle_key(ctrl('p')).unwrap();
@@ -1810,6 +1933,7 @@ mod tests {
             force: true,
             show_hidden: true,
             undo_limit: 7,
+            theme: "black".to_string(),
             source: None,
             dest: None,
         };

@@ -299,6 +299,7 @@ fn cmd_config(args: ConfigArgs) -> Result<i32> {
         paint::dim(&pad("undo", 9)),
         loaded.config.undo_limit
     );
+    println!("  {} {}", paint::dim(&pad("theme", 9)), loaded.config.theme);
     println!(
         "  {} {}",
         paint::dim(&pad("source", 9)),

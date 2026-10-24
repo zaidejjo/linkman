@@ -7,7 +7,7 @@ TUI with full mouse support, plus a sharp CLI for scripts. Create, inspect,
 retarget, audit and remove links — safely.
 
 ```text
-  ▌ linkman   symlink studio                                   v0.1.0  ·  tui
+  ▌ linkman   symlink studio
    l  link   L  rename   r  rel on   f  force off   .  hidden off   ?  help
 ────────────────────────────────────────────────────────────────────────────────
 ╭ SOURCE 5 items ── ~/projects/app ╮ ╭ DEST 2 items ───── ~/bin ╮
@@ -23,13 +23,15 @@ retarget, audit and remove links — safely.
 
 - **Two panes, one job.** SOURCE on the left, DEST on the right. Mark files,
   press `l`, done. No `ln -s` path gymnastics.
-- **Beautifully quiet.** A custom slate/mint palette, a real inspector, live
-  status, and dialogs that stay out of your way.
+- **Beautifully quiet.** Seven hand-tuned palettes (the slate/mint `black`
+  default, Catppuccin Mocha, Tokyo Night, Dracula, Gruvbox, Everforest and
+  GitHub Light), a real inspector, live status, and dialogs that stay out of
+  your way.
 - **Find anything.** `Ctrl+P` opens a floating fuzzy palette over actions, files
   and folders from both panes.
 - **Safe by default.** `unlink` only ever removes symlinks. `--force` refuses
   to replace a real directory. Conflicts ask before overwriting, and the last
-  operation can always be undone.
+  operation can always be undone — and redone if you undo by accident.
 - **Mouse-native.** Click rows, double-click folders, right-click to mark,
   scroll the wheel, hit the toolbar, the palette, and dialog buttons.
 - **Small and fast.** No daemon, no database. A single Rust binary that starts
@@ -52,8 +54,7 @@ Run `linkman` with no arguments, or point it at folders:
 
 ```sh
 linkman                                  # both panes start in the current folder
-linkman ~/projects/app --dest ~/bin      # source folder + destination folder
-linkman tui ~/projects --dest ~/bin      # same thing, explicit
+linkman tui ~/projects/app --dest ~/bin  # source folder + destination folder
 ```
 
 ### Linking
@@ -93,7 +94,13 @@ both panes**. Type fragments of a name, a path, or an action description:
 `↑↓` or the wheel to move, `Enter` or a click to run, `Esc` to close. Choosing
 a folder opens it; choosing a file reveals and selects it in its pane.
 
-### Undo
+The matcher is fzf-flavoured: word starts outrank the middle of words,
+title matches outrank subtitles, contiguous runs beat scattered letters, and
+initials work (`tgrel` → “Toggle relative”). Typing a capital letter makes the
+search case sensitive, so `Link` will not surface `unlink`. Paths shown in both
+panes are listed once.
+
+### Undo and redo
 
 Every link, retarget and removal in the current session can be undone with `u`
 or `Ctrl+Z`. Undo is deliberately careful:
@@ -105,7 +112,13 @@ or `Ctrl+Z`. Undo is deliberately careful:
 - regular files are never deleted, and an externally retargeted link is left
   untouched.
 
-Session history honours `undo_limit` from the config (default 50).
+Because undo is one keystroke away, it is easy to hit it by accident. Press
+`U` or `Ctrl+Y` to redo the operation the undo just reversed. Redo re-checks
+the filesystem too: it will not overwrite a path that has become occupied, it
+only removes a link if it still points where it did when it was removed, and
+it will never clobber a replaced entry that had no backup. Starting a new
+operation clears the redo history. Both directions honour `undo_limit` from
+the config (default 50).
 
 ### Keys
 
@@ -130,6 +143,7 @@ Session history honours `undo_limit` from the config (default 50).
 | `L` / `n` | link with a custom name |
 | `t` | retarget the selected DEST link to SOURCE |
 | `u` / `Ctrl+Z` | undo the last link, retarget or removal |
+| `U` / `Ctrl+Y` | redo the operation you just undid |
 | `r` | relative / absolute links |
 | `f` | force overwrite |
 | `x` / `Delete` | remove selected/marked symlinks |
@@ -239,6 +253,7 @@ trailing commas are fine):
   "force": false,
   "show_hidden": false,
   "undo_limit": 50,        // 1–500
+  "theme": "black",        // see Themes below
 
   // optional starting folders; CLI arguments always win
   "source": "~/projects",
@@ -250,6 +265,31 @@ Create one with `linkman config --init`, then edit it. Nothing is created
 automatically. Unknown keys and syntax errors are reported as a warning rather
 than stopping the TUI. Config preferences apply to the TUI; explicit CLI flags
 remain in charge of CLI operations.
+
+## Themes
+
+The TUI ships with seven palettes. `black` is the default: a deep slate canvas
+with mint highlights and amber links.
+
+| Name | Look |
+| --- | --- |
+| `black` | deep slate + mint · default |
+| `catppuccin-mocha` | soft pastel dark |
+| `tokyo-night` | blue-violet night |
+| `dracula` | purple night with vivid green |
+| `gruvbox` | warm retro brown |
+| `everforest` | muted forest green |
+| `github-light` | clean light theme for bright terminals |
+
+Pick one in the config:
+
+```jsonc
+{ "theme": "tokyo-night" }
+```
+
+or cycle them live from the palette (`Ctrl+P` → “Next theme”). Aliases such as
+`mocha`, `tokyonight`, `light` and `default` also work. An unknown name falls
+back to `black` with a warning in the status line.
 
 ## Shell completions
 
@@ -296,6 +336,7 @@ linkman list ~/bin --json | jq '.links[] | select(.status != "ok")'
 - `--force` will not replace a real directory.
 - `--backup` moves the old entry aside instead of deleting it.
 - TUI undo refuses to remove a link that no longer matches what linkman wrote.
+- TUI redo refuses to overwrite an occupied path or remove a changed link.
 - Broken links are first-class: they can be created, listed, found, and fixed.
 - Paths are resolved lexically; nothing is canonicalized behind your back.
 

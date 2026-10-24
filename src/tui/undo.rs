@@ -72,6 +72,114 @@ pub fn apply(op: &UndoOp) -> UndoReport {
     report
 }
 
+/// Re-run an operation that was undone. Every step re-checks the filesystem
+/// first, so a link someone edited by hand is never clobbered.
+pub fn reapply(op: &UndoOp) -> UndoReport {
+    let mut report = UndoReport::default();
+    match op {
+        UndoOp::Link { links } => redo_links(links, &mut report),
+        UndoOp::Remove { links } => redo_remove(links, &mut report),
+        UndoOp::Retarget {
+            link,
+            previous,
+            current,
+        } => redo_retarget(link, previous, current, &mut report),
+    }
+    report
+}
+
+fn redo_links(links: &[CreatedLink], report: &mut UndoReport) {
+    for created in links {
+        let occupied = fs::symlink_metadata(&created.path).is_ok();
+        let mut backed_up = None;
+        if occupied {
+            // The undo put the old entry back. Move it aside again so the
+            // redo can recreate the link, exactly like the original action.
+            let Some(backup) = &created.backup else {
+                report.skipped += 1;
+                continue;
+            };
+            if fs::symlink_metadata(backup).is_ok() {
+                report.skipped += 1;
+                continue;
+            }
+            if let Err(err) = fs::rename(&created.path, backup) {
+                report
+                    .errors
+                    .push(format!("{}: {err}", created.path.display()));
+                continue;
+            }
+            report.backups += 1;
+            backed_up = Some(backup.as_path());
+        }
+
+        match fsops::create_raw_symlink(&created.stored_target, &created.path) {
+            Ok(()) => report.restored += 1,
+            Err(err) => {
+                if let Some(backup) = backed_up {
+                    let _ = fs::rename(backup, &created.path);
+                    report.backups = report.backups.saturating_sub(1);
+                }
+                report
+                    .errors
+                    .push(format!("{}: {err}", created.path.display()));
+            }
+        }
+    }
+}
+
+fn redo_remove(links: &[RemovedLink], report: &mut UndoReport) {
+    for removed in links {
+        let Ok(md) = fs::symlink_metadata(&removed.path) else {
+            report.skipped += 1;
+            continue;
+        };
+        if !md.file_type().is_symlink() {
+            report.skipped += 1;
+            continue;
+        }
+        match fs::read_link(&removed.path) {
+            Ok(raw) if raw == removed.raw_target => match fs::remove_file(&removed.path) {
+                Ok(()) => report.restored += 1,
+                Err(err) => report
+                    .errors
+                    .push(format!("{}: {err}", removed.path.display())),
+            },
+            Ok(_) => report.skipped += 1,
+            Err(err) => report
+                .errors
+                .push(format!("{}: {err}", removed.path.display())),
+        }
+    }
+}
+
+fn redo_retarget(link: &Path, previous: &Path, current: &Path, report: &mut UndoReport) {
+    let Ok(md) = fs::symlink_metadata(link) else {
+        report.skipped += 1;
+        return;
+    };
+    if !md.file_type().is_symlink() {
+        report.skipped += 1;
+        return;
+    }
+    match fs::read_link(link) {
+        Ok(raw) if raw == previous => {}
+        Ok(_) => {
+            report.skipped += 1;
+            return;
+        }
+        Err(err) => {
+            report.errors.push(format!("{}: {err}", link.display()));
+            return;
+        }
+    }
+
+    match replace_with_raw_symlink(link, current) {
+        Ok(()) => report.restored += 1,
+        Err(err) => report.errors.push(format!("{}: {err}", link.display())),
+    }
+}
+
 fn undo_links(links: &[CreatedLink], report: &mut UndoReport) {
     for created in links {
         let mut removed = false;
@@ -263,6 +371,127 @@ mod tests {
         });
         assert_eq!(report.restored, 1);
         assert_eq!(fs::read_link(&link).unwrap(), PathBuf::from("target"));
+    }
+
+    #[test]
+    fn redo_link_recreates_it_but_never_overwrites() {
+        let tmp = tempdir().unwrap();
+        let target = tmp.path().join("target");
+        fs::write(&target, "x").unwrap();
+        let link = tmp.path().join("link");
+        let outcome = fsops::create_link(&target, &link, &fsops::LinkOptions::default()).unwrap();
+        let op = UndoOp::Link {
+            links: vec![CreatedLink {
+                path: link.clone(),
+                stored_target: outcome.stored_target,
+                backup: None,
+                replaced: false,
+            }],
+        };
+
+        assert_eq!(apply(&op).restored, 1);
+        assert!(fs::symlink_metadata(&link).is_err());
+
+        assert_eq!(reapply(&op).restored, 1);
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+
+        fs::remove_file(&link).unwrap();
+        fs::write(&link, "mine").unwrap();
+        let report = reapply(&op);
+        assert_eq!(report.restored, 0);
+        assert_eq!(report.skipped, 1);
+        assert_eq!(fs::read_to_string(&link).unwrap(), "mine");
+    }
+
+    #[test]
+    fn redo_link_moves_the_restored_entry_back_to_backup() {
+        let tmp = tempdir().unwrap();
+        let target = tmp.path().join("target");
+        fs::write(&target, "new").unwrap();
+        let link = tmp.path().join("link");
+        fs::write(&link, "old").unwrap();
+        let outcome = fsops::create_link(
+            &target,
+            &link,
+            &fsops::LinkOptions {
+                backup: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let op = UndoOp::Link {
+            links: vec![CreatedLink {
+                path: link.clone(),
+                stored_target: outcome.stored_target,
+                backup: outcome.backup.clone(),
+                replaced: true,
+            }],
+        };
+        assert_eq!(apply(&op).backups, 1);
+        assert_eq!(fs::read_to_string(&link).unwrap(), "old");
+
+        let report = reapply(&op);
+        assert_eq!(report.restored, 1);
+        assert_eq!(report.backups, 1);
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(fs::read_to_string(outcome.backup.unwrap()).unwrap(), "old");
+    }
+
+    #[test]
+    fn redo_remove_only_removes_links_it_created() {
+        let tmp = tempdir().unwrap();
+        let link = tmp.path().join("link");
+        symlink("target", &link).unwrap();
+        let op = UndoOp::Remove {
+            links: vec![RemovedLink {
+                path: link.clone(),
+                raw_target: PathBuf::from("target"),
+            }],
+        };
+
+        assert_eq!(reapply(&op).restored, 1);
+        assert!(fs::symlink_metadata(&link).is_err());
+
+        fs::write(&link, "now a file").unwrap();
+        let report = reapply(&op);
+        assert_eq!(report.restored, 0);
+        assert_eq!(report.skipped, 1);
+        assert_eq!(fs::read_to_string(&link).unwrap(), "now a file");
+    }
+
+    #[test]
+    fn redo_retarget_moves_back_to_the_new_target() {
+        let tmp = tempdir().unwrap();
+        let link = tmp.path().join("link");
+        symlink("../old", &link).unwrap();
+        let op = UndoOp::Retarget {
+            link: link.clone(),
+            previous: PathBuf::from("../old"),
+            current: PathBuf::from("../new"),
+        };
+        // The undo left the link on the previous target, so redo applies.
+        assert_eq!(reapply(&op).restored, 1);
+        assert_eq!(fs::read_link(&link).unwrap(), PathBuf::from("../new"));
+
+        // Repeating the redo on an already-retargeted link is a no-op.
+        assert_eq!(reapply(&op).skipped, 1);
+        assert_eq!(fs::read_link(&link).unwrap(), PathBuf::from("../new"));
+
+        // Undo brings it back, and redo can be used once more.
+        assert_eq!(apply(&op).restored, 1);
+        assert_eq!(fs::read_link(&link).unwrap(), PathBuf::from("../old"));
+        assert_eq!(reapply(&op).restored, 1);
+        assert_eq!(fs::read_link(&link).unwrap(), PathBuf::from("../new"));
     }
 
     #[test]

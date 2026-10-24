@@ -38,6 +38,13 @@ pub fn run(dir: Option<PathBuf>, dest: Option<PathBuf>) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let mut warning = loaded.warning.clone();
 
+    if let Err(err) = theme::set(&cfg.theme) {
+        warning = Some(match warning {
+            Some(previous) => format!("{previous} · {err}"),
+            None => err,
+        });
+    }
+
     let source = match dir {
         Some(path) => resolve_directory(path)?,
         None => match &cfg.source {

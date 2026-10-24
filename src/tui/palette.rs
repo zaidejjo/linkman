@@ -1,4 +1,9 @@
-//! The Ctrl+P fuzzy command palette: items, matching and filtering.
+//! The Ctrl+P fuzzy command palette: items, scoring and filtering.
+//!
+//! Scoring is fzf-flavoured: a match inside the title beats the same match in
+//! a subtitle, word starts beat the middle of words, contiguous runs beat
+//! scattered letters and short titles win ties. Queries with a capital letter
+//! are case sensitive, so `Link` will not surface `unlink`.
 
 use std::path::PathBuf;
 
@@ -11,6 +16,8 @@ pub enum PaletteCommand {
     Retarget,
     Remove,
     Undo,
+    Redo,
+    CycleTheme,
     ToggleRelative,
     ToggleForce,
     ToggleHidden,
@@ -43,7 +50,9 @@ pub struct PaletteItem {
     pub subtitle: String,
     pub group: &'static str,
     pub action: PaletteAction,
-    search: String,
+    title_key: String,
+    subtitle_key: String,
+    group_key: String,
 }
 
 impl PaletteItem {
@@ -55,13 +64,14 @@ impl PaletteItem {
     ) -> Self {
         let title = title.into();
         let subtitle = subtitle.into();
-        let search = format!("{title} {subtitle} {group}").to_lowercase();
         Self {
+            title_key: title.to_lowercase(),
+            subtitle_key: subtitle.to_lowercase(),
+            group_key: group.to_lowercase(),
             title,
             subtitle,
             group,
             action,
-            search,
         }
     }
 }
@@ -93,7 +103,7 @@ impl PaletteState {
         }
         let mut scored: Vec<(i64, usize)> = Vec::new();
         for (index, item) in self.items.iter().enumerate() {
-            if let Some(score) = fuzzy_score(&query, &item.search) {
+            if let Some(score) = score_item(&query, item) {
                 scored.push((score, index));
             }
         }
@@ -102,8 +112,9 @@ impl PaletteState {
                 .then_with(|| {
                     self.items[a.1]
                         .title
-                        .len()
-                        .cmp(&self.items[b.1].title.len())
+                        .chars()
+                        .count()
+                        .cmp(&self.items[b.1].title.chars().count())
                 })
                 .then_with(|| a.1.cmp(&b.1))
         });
@@ -139,69 +150,138 @@ impl PaletteState {
     }
 }
 
-const BOUNDARY: [char; 10] = [' ', '/', '\\', '_', '-', '.', ':', '>', '→', '·'];
+const TITLE_BONUS: i64 = 320;
+const SUBTITLE_BONUS: i64 = 60;
+const GROUP_BONUS: i64 = 20;
+
+const BOUNDARY: [char; 11] = [' ', '/', '\\', '_', '-', '.', ':', '>', '→', '·', ','];
 
 fn is_boundary(c: char) -> bool {
     BOUNDARY.contains(&c)
 }
 
-/// Cheap fzf-flavoured scoring: exact substrings beat scattered subsequences,
-/// and starts of words get a healthy bonus. Every whitespace-separated token
-/// must match.
-pub fn fuzzy_score(query: &str, haystack: &str) -> Option<i64> {
-    let tokens: Vec<String> = query
-        .split_whitespace()
-        .map(|token| token.to_lowercase())
-        .collect();
+/// Score one item against the whole query. Every whitespace-separated token
+/// has to match at least one field; the best field wins for that token.
+pub fn score_item(query: &str, item: &PaletteItem) -> Option<i64> {
+    let tokens: Vec<&str> = query.split_whitespace().collect();
     if tokens.is_empty() {
         return Some(0);
     }
-    let haystack = haystack.to_lowercase();
+    let sensitive = query.chars().any(char::is_uppercase);
     let mut total = 0i64;
     for token in tokens {
-        total += match_token(&token, &haystack)?;
+        let fields = if sensitive {
+            [
+                (item.title.as_str(), TITLE_BONUS),
+                (item.subtitle.as_str(), SUBTITLE_BONUS),
+                (item.group, GROUP_BONUS),
+            ]
+        } else {
+            [
+                (item.title_key.as_str(), TITLE_BONUS),
+                (item.subtitle_key.as_str(), SUBTITLE_BONUS),
+                (item.group_key.as_str(), GROUP_BONUS),
+            ]
+        };
+        let mut best: Option<i64> = None;
+        for (haystack, bonus) in fields {
+            if let Some(score) = field_score(token, haystack) {
+                let weighted = score + bonus;
+                best = Some(best.map_or(weighted, |current: i64| current.max(weighted)));
+            }
+        }
+        total += best?;
     }
     Some(total)
 }
 
-fn match_token(token: &str, haystack: &str) -> Option<i64> {
+/// Convenience wrapper used by the tests and for single-string matching.
+/// Smart case applies: an uppercase character makes the match case sensitive.
+#[cfg(test)]
+pub fn fuzzy_score(query: &str, haystack: &str) -> Option<i64> {
+    let sensitive = query.chars().any(char::is_uppercase);
+    if sensitive {
+        return score_tokens(query, haystack);
+    }
+    score_tokens(&query.to_lowercase(), &haystack.to_lowercase())
+}
+
+#[cfg(test)]
+fn score_tokens(query: &str, haystack: &str) -> Option<i64> {
+    let mut total = 0i64;
+    for token in query.split_whitespace() {
+        total += field_score(token, haystack)?;
+    }
+    Some(total)
+}
+
+fn field_score(token: &str, haystack: &str) -> Option<i64> {
+    if token.is_empty() {
+        return Some(0);
+    }
+    if haystack == token {
+        return Some(1600);
+    }
+    let hay_len = haystack.chars().count() as i64;
+    let token_len = token.chars().count() as i64;
+
     if let Some(index) = haystack.find(token) {
-        let boundary = index == 0
-            || haystack[..index]
+        let index = haystack[..index].chars().count() as i64;
+        let word_start = index == 0
+            || haystack
                 .chars()
-                .next_back()
+                .nth(index as usize - 1)
                 .is_some_and(is_boundary);
-        let mut score = 900 - (index as i64).min(120) + token.chars().count() as i64 * 4;
+        let mut score = 620 + token_len * 9;
         if index == 0 {
-            score += 320;
-        } else if boundary {
-            score += 150;
+            score += 420;
+        } else if word_start {
+            score += 190;
         }
+        score -= index.min(140);
+        // Prefer fields where the match covers more of the text.
+        score -= (hay_len - token_len).min(160) / 3;
         return Some(score);
     }
 
+    subsequence_score(token, haystack)
+}
+
+fn subsequence_score(token: &str, haystack: &str) -> Option<i64> {
     let query: Vec<char> = token.chars().collect();
-    if query.is_empty() {
-        return Some(0);
-    }
     let chars: Vec<char> = haystack.chars().collect();
     let mut matched = 0usize;
-    let mut score = 0i64;
+    let mut score = 120 + query.len() as i64 * 12;
     let mut previous: Option<usize> = None;
+    let mut boundaries = 0usize;
+
     for (index, c) in chars.iter().enumerate() {
-        if matched < query.len() && *c == query[matched] {
-            score += 10;
-            if index == 0 || is_boundary(chars[index - 1]) {
-                score += 22;
-            }
-            if previous == Some(index.saturating_sub(1)) {
-                score += 16;
-            }
-            previous = Some(index);
-            matched += 1;
+        if matched >= query.len() || *c != query[matched] {
+            continue;
         }
+        let boundary = index == 0 || is_boundary(chars[index - 1]);
+        if boundary {
+            score += 34;
+            boundaries += 1;
+        }
+        if let Some(prev) = previous {
+            let gap = index.saturating_sub(prev + 1);
+            if gap == 0 {
+                score += 24;
+            } else {
+                score -= (gap as i64).min(30);
+            }
+        }
+        previous = Some(index);
+        matched += 1;
     }
+
     if matched == query.len() {
+        // Every letter starting a word (e.g. `tgrel` → toggle relative) is a
+        // strong signal, as is a match on the first characters.
+        if boundaries == query.len() {
+            score += 140;
+        }
         Some(score)
     } else {
         None
@@ -220,21 +300,69 @@ mod tests {
     fn prefix_and_word_boundaries_win() {
         let prefix = fuzzy_score("link", "link selected → dest").unwrap();
         let later = fuzzy_score("link", "unlink symlinks").unwrap();
+        let boundary = fuzzy_score("link", "toggle sym link").unwrap();
         assert!(prefix > later);
-        assert!(fuzzy_score("dest", "link selected → dest").is_some());
+        assert!(prefix > boundary);
     }
 
     #[test]
-    fn subsequence_matching_works() {
+    fn smart_case_requires_exact_casing_when_capitalised() {
+        assert!(fuzzy_score("Link", "link selected").is_none());
+        assert!(fuzzy_score("Link", "Link selected").is_some());
+        assert!(fuzzy_score("link", "Link selected").is_some());
+        assert!(fuzzy_score("README", "README.md").is_some());
+        assert!(fuzzy_score("README", "readme.md").is_none());
+    }
+
+    #[test]
+    fn contiguous_runs_beat_scattered_letters() {
+        let run = fuzzy_score("relat", "relative links").unwrap();
+        let scattered = fuzzy_score("relat", "remove link at temp").unwrap();
+        assert!(run > scattered);
+    }
+
+    #[test]
+    fn subsequence_and_initials_match() {
         assert!(fuzzy_score("tgrel", "toggle relative links").is_some());
-        assert!(fuzzy_score("hide", "toggle hidden files").is_some());
+        assert!(fuzzy_score("gf", "go home").is_none());
+        assert!(fuzzy_score("gh", "go home").is_some());
         assert_eq!(fuzzy_score("zzz", "toggle hidden files"), None);
+    }
+
+    #[test]
+    fn title_matches_outrank_subtitle_matches() {
+        let state = PaletteState::new(vec![
+            item("Refresh panes", "R", "ACTION", PaletteCommand::Refresh),
+            item(
+                "Jump to path",
+                "refresh the view",
+                "ACTION",
+                PaletteCommand::GoTo,
+            ),
+            item("Quit", "q", "ACTION", PaletteCommand::Quit),
+        ]);
+        let mut state = state;
+        state.input.insert_str("refresh");
+        state.refilter();
+        assert_eq!(state.filtered.len(), 2);
+        assert_eq!(
+            state.selected_action(),
+            Some(PaletteAction::Command(PaletteCommand::Refresh))
+        );
     }
 
     #[test]
     fn multiple_tokens_must_all_match() {
         assert!(fuzzy_score("notes app", "/home/me/notes.md /tmp/app").is_some());
         assert!(fuzzy_score("notes nope", "/home/me/notes.md /tmp/app").is_none());
+        let themed = item(
+            "Next theme",
+            "palette · currently black",
+            "LOOK",
+            PaletteCommand::CycleTheme,
+        );
+        assert!(score_item("theme black", &themed).is_some());
+        assert!(score_item("theme nope", &themed).is_none());
     }
 
     #[test]
@@ -263,5 +391,25 @@ mod tests {
         assert_eq!(state.filtered.len(), 3);
         state.move_selection(10);
         assert_eq!(state.selected, 2);
+    }
+
+    #[test]
+    fn equal_scores_prefer_shorter_titles() {
+        let items = vec![
+            item(
+                "Toggle relative links",
+                "r",
+                "ACTION",
+                PaletteCommand::ToggleRelative,
+            ),
+            item("Relative", "r", "ACTION", PaletteCommand::ToggleRelative),
+        ];
+        let mut state = PaletteState::new(items);
+        state.input.insert_str("relative");
+        state.refilter();
+        assert_eq!(
+            state.selected_item().map(|item| item.title.as_str()),
+            Some("Relative")
+        );
     }
 }

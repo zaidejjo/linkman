@@ -112,15 +112,15 @@ fn draw_too_small(frame: &mut Frame, area: Rect) {
     let message = Text::from(vec![
         Line::from(Span::styled(
             "linkman needs a little more room",
-            Style::default().fg(AMBER).add_modifier(Modifier::BOLD),
+            Style::default().fg(amber()).add_modifier(Modifier::BOLD),
         )),
         Line::default(),
         Line::from(Span::styled(
             "resize this terminal to at least 64 × 18",
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         )),
         Line::default(),
-        Line::from(Span::styled("q quit", Style::default().fg(FAINT))),
+        Line::from(Span::styled("q quit", Style::default().fg(faint_color()))),
     ]);
     let block = Paragraph::new(message)
         .alignment(Alignment::Center)
@@ -151,27 +151,14 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect, map: &mut UiMap) {
         width: area.width.saturating_sub(4),
         height: 1,
     };
-    let mut brand = vec![Span::styled(ICON_CURSOR, Style::default().fg(MINT))];
+    let mut brand = vec![Span::styled(ICON_CURSOR, Style::default().fg(mint()))];
     brand.push(Span::raw(" "));
     brand.extend(theme::wordmark("linkman"));
     brand.push(Span::styled(
         "   symlink studio",
-        Style::default().fg(FAINT),
+        Style::default().fg(faint_color()),
     ));
     frame.render_widget(Paragraph::new(Line::from(brand)), brand_area);
-
-    let version = format!("v{}  ·  tui", env!("CARGO_PKG_VERSION"));
-    let version_width = version.chars().count() as u16;
-    let version_area = Rect {
-        x: area.right().saturating_sub(version_width + 2),
-        y: rows[0].y,
-        width: version_width,
-        height: 1,
-    };
-    frame.render_widget(
-        Paragraph::new(Span::styled(version, Style::default().fg(FAINT))),
-        version_area,
-    );
 
     let items: Vec<(&str, String, bool, ToolbarAction)> = vec![
         ("l", "link".to_string(), false, ToolbarAction::Link),
@@ -213,16 +200,16 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect, map: &mut UiMap) {
         let accent = toolbar_accent(action);
         let badge_style = if active {
             Style::default()
-                .fg(BG)
+                .fg(bg())
                 .bg(accent)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(accent).bg(SURFACE_HI)
+            Style::default().fg(accent).bg(surface_hi())
         };
         let label_style = if active {
             Style::default().fg(accent).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(MUTED)
+            Style::default().fg(muted())
         };
         let line = Line::from(vec![
             Span::styled(format!(" {key} "), badge_style),
@@ -242,7 +229,7 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect, map: &mut UiMap) {
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             "─".repeat(area.width as usize),
-            Style::default().fg(BORDER_SOFT),
+            Style::default().fg(border_soft()),
         ))),
         rows[2],
     );
@@ -250,9 +237,9 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect, map: &mut UiMap) {
 
 fn toolbar_accent(action: ToolbarAction) -> Color {
     match action {
-        ToolbarAction::ToggleForce => AMBER,
-        ToolbarAction::ToggleHidden => VIOLET,
-        _ => MINT,
+        ToolbarAction::ToggleForce => amber(),
+        ToolbarAction::ToggleHidden => violet(),
+        _ => mint(),
     }
 }
 
@@ -266,11 +253,11 @@ fn draw_pane(frame: &mut Frame, app: &App, index: usize, area: Rect, map: &mut U
     let role = if index == 0 { "SOURCE" } else { "DEST" };
     let badge_style = if active {
         Style::default()
-            .fg(BG)
-            .bg(MINT)
+            .fg(bg())
+            .bg(mint())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(MUTED).bg(SURFACE_HI)
+        Style::default().fg(muted()).bg(surface_hi())
     };
 
     let mut title = vec![Span::styled(format!(" {role} "), badge_style)];
@@ -284,7 +271,7 @@ fn draw_pane(frame: &mut Frame, app: &App, index: usize, area: Rect, map: &mut U
             "{item_count} {} ",
             if item_count == 1 { "item" } else { "items" }
         ),
-        Style::default().fg(FAINT),
+        Style::default().fg(faint_color()),
     ));
     let mut title_width = role.len() + 2 + item_count.to_string().len() + 7;
     if !pane.filter.is_empty() {
@@ -292,14 +279,14 @@ fn draw_pane(frame: &mut Frame, app: &App, index: usize, area: Rect, map: &mut U
         title_width += filter.chars().count() + 3;
         title.push(Span::styled(
             format!(" /{filter} "),
-            Style::default().fg(AMBER),
+            Style::default().fg(amber()),
         ));
     }
 
     let mut block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(if active { MINT } else { BORDER }))
+        .border_style(Style::default().fg(if active { mint() } else { border() }))
         .style(theme::surface())
         .title(Line::from(title));
     let path_budget = (area.width as usize)
@@ -311,7 +298,7 @@ fn draw_pane(frame: &mut Frame, app: &App, index: usize, area: Rect, map: &mut U
         block = block.title(
             Line::from(Span::styled(
                 format!(" {path} "),
-                Style::default().fg(if active { MUTED } else { FAINT }),
+                Style::default().fg(if active { muted() } else { faint_color() }),
             ))
             .right_aligned(),
         );
@@ -334,11 +321,11 @@ fn draw_pane(frame: &mut Frame, app: &App, index: usize, area: Rect, map: &mut U
             Paragraph::new(Text::from(vec![
                 Line::from(Span::styled(
                     "cannot read this folder",
-                    Style::default().fg(DANGER).add_modifier(Modifier::BOLD),
+                    Style::default().fg(danger()).add_modifier(Modifier::BOLD),
                 )),
                 Line::from(Span::styled(
                     util::truncate(error, rect.width as usize),
-                    Style::default().fg(MUTED),
+                    Style::default().fg(muted()),
                 )),
             ]))
             .wrap(Wrap { trim: true }),
@@ -409,11 +396,11 @@ fn draw_pane(frame: &mut Frame, app: &App, index: usize, area: Rect, map: &mut U
                 Line::default(),
                 Line::from(Span::styled(
                     "this folder is empty",
-                    Style::default().fg(MUTED),
+                    Style::default().fg(muted()),
                 )),
                 Line::from(Span::styled(
                     "← go up and pick another",
-                    Style::default().fg(FAINT),
+                    Style::default().fg(faint_color()),
                 )),
             ]))
             .alignment(Alignment::Center),
@@ -438,9 +425,9 @@ fn draw_pane(frame: &mut Frame, app: &App, index: usize, area: Rect, map: &mut U
         let marked = app.marks.contains(&entry.path);
         let line = entry_line(entry, selected, marked, active, name_width, right_width);
         let row_style = Style::default().bg(if selected {
-            if active { SELECT_BG } else { SURFACE_HI }
+            if active { select_bg() } else { surface_hi() }
         } else {
-            SURFACE
+            surface_color()
         });
         let rect = Rect {
             x: inner.x,
@@ -465,7 +452,7 @@ fn draw_pane(frame: &mut Frame, app: &App, index: usize, area: Rect, map: &mut U
             "created links land here"
         };
         frame.render_widget(
-            Paragraph::new(Span::styled(hint, Style::default().fg(FAINT))),
+            Paragraph::new(Span::styled(hint, Style::default().fg(faint_color()))),
             Rect {
                 x: inner.x + 4,
                 y: body_y + 2,
@@ -483,9 +470,9 @@ fn draw_pane(frame: &mut Frame, app: &App, index: usize, area: Rect, map: &mut U
         for row in 0..rows {
             let is_thumb = row >= thumb_top && row < thumb_top + thumb_height;
             let (symbol, color) = if is_thumb {
-                ("┃", MINT_DIM)
+                ("┃", mint_dim())
             } else {
-                ("│", BORDER)
+                ("│", border())
             };
             let rect = Rect {
                 x: track_x,
@@ -494,7 +481,7 @@ fn draw_pane(frame: &mut Frame, app: &App, index: usize, area: Rect, map: &mut U
                 height: 1,
             };
             frame.render_widget(
-                Paragraph::new(symbol).style(Style::default().fg(color).bg(SURFACE)),
+                Paragraph::new(symbol).style(Style::default().fg(color).bg(surface_color())),
                 rect,
             );
         }
@@ -510,15 +497,19 @@ fn entry_line(
     right_width: usize,
 ) -> Line<'static> {
     let (glyph, color) = match entry.kind {
-        EntryKind::Parent => (ICON_PARENT, MUTED),
-        EntryKind::Dir => (ICON_DIR, BLUE),
-        EntryKind::File => (ICON_FILE, FAINT),
-        EntryKind::Link => (ICON_LINK, AMBER),
-        EntryKind::Broken => (ICON_BROKEN, DANGER),
-        EntryKind::Loop => (ICON_LOOP, VIOLET),
+        EntryKind::Parent => (ICON_PARENT, muted()),
+        EntryKind::Dir => (ICON_DIR, blue()),
+        EntryKind::File => (ICON_FILE, faint_color()),
+        EntryKind::Link => (ICON_LINK, amber()),
+        EntryKind::Broken => (ICON_BROKEN, danger()),
+        EntryKind::Loop => (ICON_LOOP, violet()),
     };
 
-    let bar_color = if selected && active { MINT } else { FAINT };
+    let bar_color = if selected && active {
+        mint()
+    } else {
+        faint_color()
+    };
     let bar = if selected { ICON_CURSOR } else { " " };
     let mark = if marked { ICON_MARK } else { " " };
 
@@ -530,9 +521,9 @@ fn entry_line(
     let name_padding = " ".repeat(name_width.saturating_sub(name.chars().count()));
 
     let name_color = if selected {
-        BRIGHT
+        bright()
     } else if entry.hidden {
-        FAINT
+        faint_color()
     } else {
         color
     };
@@ -544,13 +535,13 @@ fn entry_line(
 
     let right = entry.right_label();
     let right_color = if selected {
-        TEXT
+        text_color()
     } else {
         match entry.kind {
-            EntryKind::Broken | EntryKind::Loop => DANGER,
-            EntryKind::Link => AMBER_DIM,
-            EntryKind::Dir => FAINT,
-            _ => MUTED,
+            EntryKind::Broken | EntryKind::Loop => danger(),
+            EntryKind::Link => amber_dim(),
+            EntryKind::Dir => faint_color(),
+            _ => muted(),
         }
     };
     let right_padded = format!(
@@ -561,7 +552,7 @@ fn entry_line(
 
     Line::from(vec![
         Span::styled(bar, Style::default().fg(bar_color)),
-        Span::styled(mark, Style::default().fg(AMBER)),
+        Span::styled(mark, Style::default().fg(amber())),
         Span::styled(format!("{glyph} "), Style::default().fg(color)),
         Span::styled(name, name_style),
         Span::raw(name_padding),
@@ -579,16 +570,16 @@ fn draw_inspector(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(BORDER))
+        .border_style(Style::default().fg(border()))
         .style(theme::surface())
         .title(Line::from(Span::styled(
             " INSPECTOR ",
-            Style::default().fg(MUTED).add_modifier(Modifier::BOLD),
+            Style::default().fg(muted()).add_modifier(Modifier::BOLD),
         )))
         .title(
             Line::from(Span::styled(
                 " r relative · f force · Space mark ",
-                Style::default().fg(FAINT),
+                Style::default().fg(faint_color()),
             ))
             .right_aligned(),
         );
@@ -602,7 +593,7 @@ fn draw_inspector(frame: &mut Frame, app: &App, area: Rect) {
     let lines: Vec<Line> = match app.active_entry() {
         None => vec![Line::from(Span::styled(
             "nothing selected",
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         ))],
         Some(entry) => {
             let color = kind_color(entry);
@@ -613,34 +604,34 @@ fn draw_inspector(frame: &mut Frame, app: &App, area: Rect) {
                 ),
                 Span::styled(
                     util::truncate(&entry.name, width.saturating_sub(24)),
-                    Style::default().fg(BRIGHT).add_modifier(Modifier::BOLD),
+                    Style::default().fg(bright()).add_modifier(Modifier::BOLD),
                 ),
                 Span::raw("  "),
                 Span::styled(
                     format!(" {} ", kind_word(entry)),
-                    Style::default().fg(color).bg(SURFACE_HI),
+                    Style::default().fg(color).bg(surface_hi()),
                 ),
                 Span::styled(
                     format!("  {}", entry.right_label()),
-                    Style::default().fg(MUTED),
+                    Style::default().fg(muted()),
                 ),
             ];
             if app.marks.contains(&entry.path) {
                 first.push(Span::styled(
                     format!("   {ICON_MARK} marked"),
-                    Style::default().fg(AMBER),
+                    Style::default().fg(amber()),
                 ));
             }
 
             let second = vec![Span::styled(
                 util::truncate(&util::tildify(&entry.path), width),
-                Style::default().fg(MUTED),
+                Style::default().fg(muted()),
             )];
 
             let third = if entry.is_link() {
                 let mut spans = vec![Span::styled(
                     format!("{ICON_LINK} "),
-                    Style::default().fg(AMBER),
+                    Style::default().fg(amber()),
                 )];
                 spans.push(Span::styled(
                     util::truncate(
@@ -651,18 +642,18 @@ fn draw_inspector(frame: &mut Frame, app: &App, area: Rect) {
                             .unwrap_or_else(|| "?".to_string()),
                         width.saturating_sub(30),
                     ),
-                    Style::default().fg(AMBER),
+                    Style::default().fg(amber()),
                 ));
                 spans.push(match entry.kind {
                     EntryKind::Broken => Span::styled(
                         "   ✗ broken",
-                        Style::default().fg(DANGER).add_modifier(Modifier::BOLD),
+                        Style::default().fg(danger()).add_modifier(Modifier::BOLD),
                     ),
                     EntryKind::Loop => Span::styled(
                         "   ↻ loop",
-                        Style::default().fg(DANGER).add_modifier(Modifier::BOLD),
+                        Style::default().fg(danger()).add_modifier(Modifier::BOLD),
                     ),
-                    _ => Span::styled("   ✓ resolves", Style::default().fg(MINT)),
+                    _ => Span::styled("   ✓ resolves", Style::default().fg(mint())),
                 });
                 if let Some(resolved) = &entry.resolved {
                     spans.push(Span::styled(
@@ -670,7 +661,7 @@ fn draw_inspector(frame: &mut Frame, app: &App, area: Rect) {
                             "   {}",
                             util::shorten_path(resolved, width.saturating_sub(40).max(8))
                         ),
-                        Style::default().fg(FAINT),
+                        Style::default().fg(faint_color()),
                     ));
                 }
                 Line::from(spans)
@@ -682,15 +673,15 @@ fn draw_inspector(frame: &mut Frame, app: &App, area: Rect) {
                             "   ·   {}",
                             entry.mode_string().unwrap_or_else(|| "—".to_string())
                         ),
-                        Style::default().fg(MUTED),
+                        Style::default().fg(muted()),
                     ),
                     Span::styled(
                         format!("   ·   {}", util::ago_label(entry.modified)),
-                        Style::default().fg(FAINT),
+                        Style::default().fg(faint_color()),
                     ),
                 ];
                 if entry.hidden {
-                    spans.push(Span::styled("   ·   hidden", Style::default().fg(VIOLET)));
+                    spans.push(Span::styled("   ·   hidden", Style::default().fg(violet())));
                 }
                 Line::from(spans)
             };
@@ -700,17 +691,17 @@ fn draw_inspector(frame: &mut Frame, app: &App, area: Rect) {
                 let mut fourth = vec![
                     Span::styled(
                         entry.mode_string().unwrap_or_else(|| "—".to_string()),
-                        Style::default().fg(FAINT),
+                        Style::default().fg(faint_color()),
                     ),
                     Span::styled(
                         format!("   ·   modified {}", util::ago_label(entry.modified)),
-                        Style::default().fg(FAINT),
+                        Style::default().fg(faint_color()),
                     ),
                 ];
                 if entry.is_dir {
                     fourth.push(Span::styled(
                         "   ·   points to a folder",
-                        Style::default().fg(BLUE),
+                        Style::default().fg(blue()),
                     ));
                 }
                 out.push(Line::from(fourth));
@@ -733,11 +724,11 @@ fn draw_inspector(frame: &mut Frame, app: &App, area: Rect) {
 
 fn kind_color(entry: &Entry) -> Color {
     match entry.kind {
-        EntryKind::Parent => MUTED,
-        EntryKind::Dir => BLUE,
-        EntryKind::File => TEXT,
-        EntryKind::Link => AMBER,
-        EntryKind::Broken | EntryKind::Loop => DANGER,
+        EntryKind::Parent => muted(),
+        EntryKind::Dir => blue(),
+        EntryKind::File => text_color(),
+        EntryKind::Link => amber(),
+        EntryKind::Broken | EntryKind::Loop => danger(),
     }
 }
 
@@ -777,20 +768,20 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
             right_width += 1;
         }
         let color = if badge.starts_with("REL") {
-            MINT
+            mint()
         } else if badge.starts_with("FORCE") {
-            AMBER
+            amber()
         } else if badge.starts_with("HIDDEN") {
-            VIOLET
+            violet()
         } else {
-            AMBER
+            amber()
         };
         right_width += badge.chars().count() + 2;
         right_spans.push(Span::styled(
             format!(" {badge} "),
             Style::default()
                 .fg(color)
-                .bg(SURFACE_HI)
+                .bg(surface_hi())
                 .add_modifier(Modifier::BOLD),
         ));
     }
@@ -802,9 +793,9 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
     let left_line = match &app.toast {
         Some(toast) => {
             let (icon, color, text_color) = match toast.level {
-                ToastLevel::Success => (paint_check(), MINT, TEXT),
-                ToastLevel::Error => ("✗", DANGER, DANGER),
-                ToastLevel::Info => ("·", MUTED, MUTED),
+                ToastLevel::Success => (paint_check(), mint(), text_color()),
+                ToastLevel::Error => ("✗", danger(), danger()),
+                ToastLevel::Info => ("·", muted(), muted()),
             };
             Line::from(vec![
                 Span::raw(" "),
@@ -821,10 +812,10 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
         }
         None => Line::from(vec![
             Span::raw(" "),
-            Span::styled("ready", Style::default().fg(MUTED)),
+            Span::styled("ready", Style::default().fg(muted())),
             Span::styled(
                 "   ·   pick a SOURCE, then l links it into DEST",
-                Style::default().fg(FAINT),
+                Style::default().fg(faint_color()),
             ),
         ]),
     };
@@ -868,7 +859,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
             break;
         }
         if index > 0 {
-            spans.push(Span::styled("  ·  ", Style::default().fg(FAINT)));
+            spans.push(Span::styled("  ·  ", Style::default().fg(faint_color())));
             used += separator;
         }
         spans.extend(theme::hint(key, label));
@@ -894,7 +885,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(" q ", theme::keycap()),
-                Span::styled(" quit", Style::default().fg(MUTED)),
+                Span::styled(" quit", Style::default().fg(muted())),
             ]))
             .style(theme::base()),
             quit,
@@ -950,7 +941,7 @@ fn popup_chrome(
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(accent))
-        .style(Style::default().bg(SURFACE_HI))
+        .style(Style::default().bg(surface_hi()))
         .title(Line::from(Span::styled(
             format!(" {title} "),
             Style::default().fg(accent).add_modifier(Modifier::BOLD),
@@ -992,18 +983,18 @@ fn draw_buttons(frame: &mut Frame, inner: Rect, y: u16, buttons: &[Button], map:
             Span::styled(
                 format!(" {} ", button.key),
                 Style::default()
-                    .fg(BG)
+                    .fg(bg())
                     .bg(button.accent)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),
             Span::styled(
                 format!(" {} ", button.label),
-                Style::default().fg(TEXT).bg(BORDER_SOFT),
+                Style::default().fg(text_color()).bg(border_soft()),
             ),
         ]);
         frame.render_widget(
-            Paragraph::new(line).style(Style::default().bg(SURFACE_HI)),
+            Paragraph::new(line).style(Style::default().bg(surface_hi())),
             rect,
         );
         map.modal.push((rect, button.action));
@@ -1016,7 +1007,7 @@ fn draw_buttons(frame: &mut Frame, inner: Rect, y: u16, buttons: &[Button], map:
 // ---------------------------------------------------------------------------
 
 fn draw_prompt(frame: &mut Frame, prompt: &PromptState, area: Rect, map: &mut UiMap) {
-    let inner = popup_chrome(frame, area, 72, 9, &prompt.title, MINT);
+    let inner = popup_chrome(frame, area, 72, 9, &prompt.title, mint());
     if inner.height == 0 {
         return;
     }
@@ -1025,7 +1016,7 @@ fn draw_prompt(frame: &mut Frame, prompt: &PromptState, area: Rect, map: &mut Ui
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             util::truncate(&prompt.message, content_width as usize),
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         ))),
         Rect {
             x: inner.x + 2,
@@ -1047,32 +1038,32 @@ fn draw_prompt(frame: &mut Frame, prompt: &PromptState, area: Rect, map: &mut Ui
         height: 1,
     };
     frame.render_widget(
-        Paragraph::new("").style(Style::default().bg(SURFACE)),
+        Paragraph::new("").style(Style::default().bg(surface_color())),
         field_rect,
     );
     let input_width = field_rect.width.saturating_sub(12).max(4) as usize;
     let (before, at, after) = prompt.input.view(input_width);
     let cursor_style = Style::default()
-        .fg(BG)
-        .bg(MINT)
+        .fg(bg())
+        .bg(mint())
         .add_modifier(Modifier::BOLD);
     let line = Line::from(vec![
         Span::raw(" "),
         Span::styled(
             format!("{label:<6}  "),
-            Style::default().fg(MUTED).bg(SURFACE),
+            Style::default().fg(muted()).bg(surface_color()),
         ),
-        Span::styled("› ", Style::default().fg(MINT).bg(SURFACE)),
-        Span::styled(before, Style::default().fg(BRIGHT).bg(SURFACE)),
+        Span::styled("› ", Style::default().fg(mint()).bg(surface_color())),
+        Span::styled(before, Style::default().fg(bright()).bg(surface_color())),
         Span::styled(at.to_string(), cursor_style),
-        Span::styled(after, Style::default().fg(BRIGHT).bg(SURFACE)),
+        Span::styled(after, Style::default().fg(bright()).bg(surface_color())),
     ]);
     frame.render_widget(Paragraph::new(line), field_rect);
 
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             util::truncate(&prompt.hint, content_width as usize),
-            Style::default().fg(FAINT),
+            Style::default().fg(faint_color()),
         ))),
         Rect {
             x: inner.x + 2,
@@ -1087,13 +1078,13 @@ fn draw_prompt(frame: &mut Frame, prompt: &PromptState, area: Rect, map: &mut Ui
             key: "Enter",
             label: "confirm",
             action: ModalAction::PromptSubmit,
-            accent: MINT,
+            accent: mint(),
         },
         Button {
             key: "Esc",
             label: "cancel",
             action: ModalAction::PromptCancel,
-            accent: MUTED,
+            accent: muted(),
         },
     ];
     let y = inner.bottom().saturating_sub(1);
@@ -1106,16 +1097,16 @@ fn draw_prompt(frame: &mut Frame, prompt: &PromptState, area: Rect, map: &mut Ui
 
 fn draw_confirm(frame: &mut Frame, confirm: &ConfirmState, area: Rect, map: &mut UiMap) {
     let height = (confirm.lines.len() as u16 + 6).min(16);
-    let inner = popup_chrome(frame, area, 66, height, &confirm.title, DANGER);
+    let inner = popup_chrome(frame, area, 66, height, &confirm.title, danger());
     if inner.height < 4 {
         return;
     }
     let mut lines: Vec<Line> = Vec::new();
     for (index, text) in confirm.lines.iter().enumerate() {
         let style = if index == 0 {
-            Style::default().fg(BRIGHT).add_modifier(Modifier::BOLD)
+            Style::default().fg(bright()).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(MUTED)
+            Style::default().fg(muted())
         };
         lines.push(Line::from(Span::styled(
             util::truncate(text, inner.width.saturating_sub(4) as usize),
@@ -1125,11 +1116,11 @@ fn draw_confirm(frame: &mut Frame, confirm: &ConfirmState, area: Rect, map: &mut
     lines.push(Line::default());
     lines.push(Line::from(Span::styled(
         "The link is removed. The file it points to is untouched.",
-        Style::default().fg(FAINT),
+        Style::default().fg(faint_color()),
     )));
 
     frame.render_widget(
-        Paragraph::new(Text::from(lines)).style(Style::default().bg(SURFACE_HI)),
+        Paragraph::new(Text::from(lines)).style(Style::default().bg(surface_hi())),
         Rect {
             x: inner.x + 2,
             y: inner.y,
@@ -1143,13 +1134,13 @@ fn draw_confirm(frame: &mut Frame, confirm: &ConfirmState, area: Rect, map: &mut
             key: "y",
             label: "remove",
             action: ModalAction::ConfirmYes,
-            accent: DANGER,
+            accent: danger(),
         },
         Button {
             key: "Esc",
             label: "cancel",
             action: ModalAction::ConfirmNo,
-            accent: MUTED,
+            accent: muted(),
         },
     ];
     draw_buttons(
@@ -1169,7 +1160,7 @@ fn draw_conflict(frame: &mut Frame, conflict: &ConflictState, area: Rect, map: &
     let shown = conflict.conflicts.len().min(4);
     let extra = conflict.conflicts.len().saturating_sub(shown);
     let height = (shown as u16 + 10 + if extra > 0 { 1 } else { 0 }).min(18);
-    let inner = popup_chrome(frame, area, 70, height, "Name conflict", AMBER);
+    let inner = popup_chrome(frame, area, 70, height, "Name conflict", amber());
     if inner.height < 6 {
         return;
     }
@@ -1191,7 +1182,7 @@ fn draw_conflict(frame: &mut Frame, conflict: &ConflictState, area: Rect, map: &
         util::shorten_path(&conflict.dest, 36)
     );
     frame.render_widget(
-        Paragraph::new(Span::styled(intro, Style::default().fg(BRIGHT))),
+        Paragraph::new(Span::styled(intro, Style::default().fg(bright()))),
         Rect {
             x: inner.x + 2,
             y: inner.y,
@@ -1203,10 +1194,10 @@ fn draw_conflict(frame: &mut Frame, conflict: &ConflictState, area: Rect, map: &
     for (index, name) in conflict.conflicts.iter().take(shown).enumerate() {
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled("  • ", Style::default().fg(AMBER)),
+                Span::styled("  • ", Style::default().fg(amber())),
                 Span::styled(
                     util::truncate(name, inner.width.saturating_sub(8) as usize),
-                    Style::default().fg(AMBER),
+                    Style::default().fg(amber()),
                 ),
             ])),
             Rect {
@@ -1222,7 +1213,7 @@ fn draw_conflict(frame: &mut Frame, conflict: &ConflictState, area: Rect, map: &
         frame.render_widget(
             Paragraph::new(Span::styled(
                 format!("  … and {extra} more"),
-                Style::default().fg(FAINT),
+                Style::default().fg(faint_color()),
             )),
             Rect {
                 x: inner.x + 2,
@@ -1237,7 +1228,7 @@ fn draw_conflict(frame: &mut Frame, conflict: &ConflictState, area: Rect, map: &
     frame.render_widget(
         Paragraph::new(Span::styled(
             "Choose what to do with the existing entries:",
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         )),
         Rect {
             x: inner.x + 2,
@@ -1263,15 +1254,15 @@ fn draw_conflict(frame: &mut Frame, conflict: &ConflictState, area: Rect, map: &
             height: 1,
         };
         let style = if selected {
-            Style::default().bg(SELECT_BG)
+            Style::default().bg(select_bg())
         } else {
-            Style::default().bg(SURFACE_HI)
+            Style::default().bg(surface_hi())
         };
-        let bar_color = if selected { MINT } else { FAINT };
+        let bar_color = if selected { mint() } else { faint_color() };
         let name_style = if selected {
-            Style::default().fg(BRIGHT).add_modifier(Modifier::BOLD)
+            Style::default().fg(bright()).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(MUTED)
+            Style::default().fg(muted())
         };
         frame.render_widget(
             Paragraph::new(Line::from(vec![
@@ -1292,7 +1283,7 @@ fn draw_conflict(frame: &mut Frame, conflict: &ConflictState, area: Rect, map: &
     frame.render_widget(
         Paragraph::new(Span::styled(
             "↑↓ choose · Enter apply · Esc cancel",
-            Style::default().fg(FAINT),
+            Style::default().fg(faint_color()),
         )),
         Rect {
             x: inner.x + 2,
@@ -1308,7 +1299,7 @@ fn draw_conflict(frame: &mut Frame, conflict: &ConflictState, area: Rect, map: &
 // ---------------------------------------------------------------------------
 
 fn draw_palette(frame: &mut Frame, palette: &PaletteState, area: Rect, map: &mut UiMap) {
-    let inner = popup_chrome(frame, area, 88, 19, "Command palette", MINT);
+    let inner = popup_chrome(frame, area, 88, 19, "Command palette", mint());
     if inner.height < 6 {
         return;
     }
@@ -1320,22 +1311,22 @@ fn draw_palette(frame: &mut Frame, palette: &PaletteState, area: Rect, map: &mut
         height: 1,
     };
     frame.render_widget(
-        Paragraph::new("").style(Style::default().bg(SURFACE)),
+        Paragraph::new("").style(Style::default().bg(surface_color())),
         search,
     );
     let input_width = search.width.saturating_sub(12).max(4) as usize;
     let (before, at, after) = palette.input.view(input_width);
     let cursor_style = Style::default()
-        .fg(BG)
-        .bg(MINT)
+        .fg(bg())
+        .bg(mint())
         .add_modifier(Modifier::BOLD);
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::raw(" "),
-            Span::styled("⌕  ", Style::default().fg(MINT).bg(SURFACE)),
-            Span::styled(before, Style::default().fg(BRIGHT).bg(SURFACE)),
+            Span::styled("⌕  ", Style::default().fg(mint()).bg(surface_color())),
+            Span::styled(before, Style::default().fg(bright()).bg(surface_color())),
             Span::styled(at.to_string(), cursor_style),
-            Span::styled(after, Style::default().fg(BRIGHT).bg(SURFACE)),
+            Span::styled(after, Style::default().fg(bright()).bg(surface_color())),
         ])),
         search,
     );
@@ -1345,8 +1336,11 @@ fn draw_palette(frame: &mut Frame, palette: &PaletteState, area: Rect, map: &mut
         if palette.filtered.len() == 1 { "" } else { "s" }
     );
     frame.render_widget(
-        Paragraph::new(Span::styled(total_label, Style::default().fg(FAINT)))
-            .alignment(Alignment::Right),
+        Paragraph::new(Span::styled(
+            total_label,
+            Style::default().fg(faint_color()),
+        ))
+        .alignment(Alignment::Right),
         Rect {
             x: inner.x,
             y: inner.y,
@@ -1358,7 +1352,7 @@ fn draw_palette(frame: &mut Frame, palette: &PaletteState, area: Rect, map: &mut
     frame.render_widget(
         Paragraph::new(Span::styled(
             "─".repeat(inner.width as usize),
-            Style::default().fg(BORDER),
+            Style::default().fg(border()),
         )),
         Rect {
             x: inner.x,
@@ -1379,10 +1373,10 @@ fn draw_palette(frame: &mut Frame, palette: &PaletteState, area: Rect, map: &mut
         frame.render_widget(
             Paragraph::new(Text::from(vec![
                 Line::default(),
-                Line::from(Span::styled("no matches", Style::default().fg(MUTED))),
+                Line::from(Span::styled("no matches", Style::default().fg(muted()))),
                 Line::from(Span::styled(
                     "try a shorter word, or a path fragment",
-                    Style::default().fg(FAINT),
+                    Style::default().fg(faint_color()),
                 )),
             ]))
             .alignment(Alignment::Center),
@@ -1416,14 +1410,14 @@ fn draw_palette(frame: &mut Frame, palette: &PaletteState, area: Rect, map: &mut
             };
             let selected = position == palette.selected;
             let group_color = match item.group {
-                "SOURCE" => BLUE,
-                "DEST" => AMBER,
-                _ => MINT,
+                "SOURCE" => blue(),
+                "DEST" => amber(),
+                _ => mint(),
             };
             let title_style = if selected {
-                Style::default().fg(BRIGHT).add_modifier(Modifier::BOLD)
+                Style::default().fg(bright()).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(TEXT)
+                Style::default().fg(text_color())
             };
             let bar = if selected { ICON_CURSOR } else { " " };
             let rect = Rect {
@@ -1436,24 +1430,24 @@ fn draw_palette(frame: &mut Frame, palette: &PaletteState, area: Rect, map: &mut
                 Paragraph::new(Line::from(vec![
                     Span::styled(
                         bar,
-                        Style::default().fg(if selected { MINT } else { FAINT }),
+                        Style::default().fg(if selected { mint() } else { faint_color() }),
                     ),
                     Span::styled(
                         format!(" {:<6} ", item.group),
-                        Style::default().fg(group_color).bg(SURFACE_HI),
+                        Style::default().fg(group_color).bg(surface_hi()),
                     ),
                     Span::raw(" "),
                     Span::styled(util::truncate(&item.title, title_width), title_style),
                     Span::raw("   "),
                     Span::styled(
                         util::truncate(&item.subtitle, subtitle_width),
-                        Style::default().fg(if selected { MUTED } else { FAINT }),
+                        Style::default().fg(if selected { muted() } else { faint_color() }),
                     ),
                 ]))
                 .style(Style::default().bg(if selected {
-                    SELECT_BG
+                    select_bg()
                 } else {
-                    SURFACE_HI
+                    surface_hi()
                 })),
                 rect,
             );
@@ -1463,7 +1457,7 @@ fn draw_palette(frame: &mut Frame, palette: &PaletteState, area: Rect, map: &mut
 
     let hint = " ↑↓ move · Enter run · Esc close";
     frame.render_widget(
-        Paragraph::new(Span::styled(hint, Style::default().fg(FAINT))),
+        Paragraph::new(Span::styled(hint, Style::default().fg(faint_color()))),
         Rect {
             x: inner.x + 1,
             y: footer_y,
@@ -1473,7 +1467,8 @@ fn draw_palette(frame: &mut Frame, palette: &PaletteState, area: Rect, map: &mut
     );
     let total = format!("{}/{}", palette.filtered.len(), palette.items.len());
     frame.render_widget(
-        Paragraph::new(Span::styled(total, Style::default().fg(FAINT))).alignment(Alignment::Right),
+        Paragraph::new(Span::styled(total, Style::default().fg(faint_color())))
+            .alignment(Alignment::Right),
         Rect {
             x: inner.x,
             y: footer_y,
@@ -1489,7 +1484,7 @@ fn draw_palette(frame: &mut Frame, palette: &PaletteState, area: Rect, map: &mut
 
 fn draw_help(frame: &mut Frame, _app: &App, area: Rect, map: &mut UiMap) {
     let height = 21.min(area.height.saturating_sub(2));
-    let inner = popup_chrome(frame, area, 100, height, "Keys & shortcuts", MINT);
+    let inner = popup_chrome(frame, area, 100, height, "Keys & shortcuts", mint());
     if inner.height < 6 {
         return;
     }
@@ -1539,7 +1534,8 @@ fn draw_help(frame: &mut Frame, _app: &App, area: Rect, map: &mut UiMap) {
         &[
             ("1 / 2", "pane"),
             ("R", "refresh"),
-            ("u", "undo"),
+            ("u / ^Z", "undo"),
+            ("U / ^Y", "redo"),
             ("q", "quit"),
         ],
     ));
@@ -1567,7 +1563,7 @@ fn draw_help(frame: &mut Frame, _app: &App, area: Rect, map: &mut UiMap) {
 
     for (column, lines) in columns.iter().zip([navigate, link, mouse]) {
         frame.render_widget(
-            Paragraph::new(Text::from(lines)).style(Style::default().bg(SURFACE_HI)),
+            Paragraph::new(Text::from(lines)).style(Style::default().bg(surface_hi())),
             *column,
         );
     }
@@ -1575,7 +1571,7 @@ fn draw_help(frame: &mut Frame, _app: &App, area: Rect, map: &mut UiMap) {
     frame.render_widget(
         Paragraph::new(Span::styled(
             "Mouse works everywhere.",
-            Style::default().fg(FAINT),
+            Style::default().fg(faint_color()),
         )),
         Rect {
             x: inner.x + 2,
@@ -1589,7 +1585,7 @@ fn draw_help(frame: &mut Frame, _app: &App, area: Rect, map: &mut UiMap) {
         key: "Esc",
         label: "close",
         action: ModalAction::CloseHelp,
-        accent: MUTED,
+        accent: muted(),
     }];
     draw_buttons(
         frame,
@@ -1604,17 +1600,17 @@ fn section(title: &str, rows: &[(&str, &str)]) -> Vec<Line<'static>> {
     let mut lines = vec![
         Line::from(Span::styled(
             title.to_string(),
-            Style::default().fg(MINT).add_modifier(Modifier::BOLD),
+            Style::default().fg(mint()).add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             "─".repeat(title.chars().count()),
-            Style::default().fg(BORDER),
+            Style::default().fg(border()),
         )),
     ];
     for (key, label) in rows {
         lines.push(Line::from(vec![
-            Span::styled(format!(" {key:<9} "), Style::default().fg(AMBER)),
-            Span::styled(label.to_string(), Style::default().fg(TEXT)),
+            Span::styled(format!(" {key:<9} "), Style::default().fg(amber())),
+            Span::styled(label.to_string(), Style::default().fg(text_color())),
         ]));
     }
     lines.push(Line::default());

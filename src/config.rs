@@ -19,6 +19,9 @@ pub struct Config {
     pub show_hidden: bool,
     /// How many operations the TUI remembers for undo.
     pub undo_limit: usize,
+    /// Colour palette: black, catppuccin-mocha, tokyo-night, dracula,
+    /// gruvbox, everforest or github-light.
+    pub theme: String,
     /// Optional starting folder for the SOURCE pane (CLI arguments win).
     pub source: Option<PathBuf>,
     /// Optional starting folder for the DEST pane (CLI arguments win).
@@ -32,6 +35,7 @@ impl Default for Config {
             force: false,
             show_hidden: false,
             undo_limit: 50,
+            theme: "black".to_string(),
             source: None,
             dest: None,
         }
@@ -54,6 +58,10 @@ impl Config {
   // Number of operations remembered by undo (1–500).
   "undo_limit": 50,
 
+  // Palette: black (default), catppuccin-mocha, tokyo-night, dracula,
+  // gruvbox, everforest or github-light. Ctrl+P can cycle them too.
+  "theme": "black",
+
   // Optional starting folders. CLI arguments always take precedence.
   "source": null,
   "dest": null
@@ -62,6 +70,10 @@ impl Config {
 
     fn sanitized(mut self) -> Self {
         self.undo_limit = self.undo_limit.clamp(1, 500);
+        self.theme = self.theme.trim().to_string();
+        if self.theme.is_empty() {
+            self.theme = "black".to_string();
+        }
         self.source = self.source.map(expand);
         self.dest = self.dest.map(expand);
         self
@@ -303,6 +315,17 @@ mod tests {
         assert_eq!(loaded.undo_limit, 1);
         let loaded = parse(r#"{"undo_limit": 9999}"#).unwrap().sanitized();
         assert_eq!(loaded.undo_limit, 500);
+    }
+
+    #[test]
+    fn theme_defaults_to_black_and_is_kept_verbatim() {
+        assert_eq!(Config::default().theme, "black");
+        let config = parse(r#"{"theme": "  Catppuccin Mocha  "}"#)
+            .unwrap()
+            .sanitized();
+        assert_eq!(config.theme, "Catppuccin Mocha");
+        let config = parse(r#"{"theme": "   "}"#).unwrap().sanitized();
+        assert_eq!(config.theme, "black");
     }
 
     #[test]
