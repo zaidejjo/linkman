@@ -39,8 +39,11 @@ audit and remove links — safely.
 **Arch Linux (AUR)**
 
 ```sh
-yay -S linkman-bin        # or: paru -S linkman-bin
+yay -S linkman            # or: paru -S linkman
 ```
+
+`linkman-bin` is the same package under its other name — whichever your helper
+resolves first.
 
 **Debian / Ubuntu**
 

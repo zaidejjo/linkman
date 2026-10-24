@@ -25,7 +25,7 @@ jobs:
       - name: Install toolchain
         run: |
           rustup set profile minimal
-          rustup toolchain install stable --component rustfmt clippy
+          rustup toolchain install stable --component rustfmt,clippy
           rustup default stable
 
       - uses: actions/cache@v4
@@ -162,6 +162,21 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      - name: Both AUR packages must exist (create them once on the AUR website)
+        run: |
+          info="$(curl -fsSL 'https://aur.archlinux.org/rpc/v5/info?arg[]=linkman&arg[]=linkman-bin')"
+          for pkg in linkman linkman-bin; do
+            case "$info" in
+              *"\"name\":\"$pkg\""*)
+                echo "${pkg} is on the AUR"
+                ;;
+              *)
+                echo "::error::AUR package '${pkg}' does not exist yet. Create it once at https://aur.archlinux.org/packages/${pkg}/ (submit an empty package), then re-run this job."
+                exit 1
+                ;;
+            esac
+          done
+
       - name: Download the released tarball and hash it
         run: |
           version="${GITHUB_REF_NAME#v}"
@@ -169,18 +184,21 @@ jobs:
             "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/linkman-${version}-x86_64-unknown-linux-gnu.tar.gz"
           echo "PKG_SHA256=$(sha256sum /tmp/linkman.tar.gz | cut -d' ' -f1)" >> "$GITHUB_ENV"
 
-      - name: Render the PKGBUILD
+      - name: Render the PKGBUILDs
         run: |
           version="${GITHUB_REF_NAME#v}"
-          work="$RUNNER_TEMP/aur"
-          mkdir -p "$work"
-          sed -e "s|@VERSION@|${version}|g" \
-              -e "s|@SHA256@|${PKG_SHA256}|g" \
-              -e "s|@REPO@|${GITHUB_REPOSITORY}|g" \
-              packaging/aur/PKGBUILD > "$work/PKGBUILD"
-          chown -R builder:builder "$work"
-          su -s /bin/bash builder -c "cd '$work' && makepkg --printsrcinfo > .SRCINFO"
-          cat "$work/PKGBUILD" "$work/.SRCINFO"
+          for pkg in linkman linkman-bin; do
+            work="$RUNNER_TEMP/aur-${pkg}"
+            mkdir -p "$work"
+            sed -e "s|@VERSION@|${version}|g" \
+                -e "s|@SHA256@|${PKG_SHA256}|g" \
+                -e "s|@REPO@|${GITHUB_REPOSITORY}|g" \
+                "packaging/aur/${pkg}/PKGBUILD" > "$work/PKGBUILD"
+            chown -R builder:builder "$work"
+            su -s /bin/bash builder -c "cd '$work' && makepkg --printsrcinfo > .SRCINFO"
+            echo "=== ${pkg}"
+            cat "$work/PKGBUILD" "$work/.SRCINFO"
+          done
 
       - name: Push to the AUR
         env:
@@ -197,15 +215,21 @@ jobs:
           ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
-          git clone ssh://aur@aur.archlinux.org/linkman-bin.git /tmp/aur-repo
-          cp "$RUNNER_TEMP/aur/PKGBUILD" "$RUNNER_TEMP/aur/.SRCINFO" /tmp/aur-repo/
-          cd /tmp/aur-repo
-          git config user.name "linkman CI"
-          git config user.email "zaidejjo@users.noreply.github.com"
-          git add PKGBUILD .SRCINFO
-          if git diff --cached --quiet; then
-            echo "AUR already up to date for ${version}"
-          else
-            git commit -m "linkman ${version}"
-            git push origin HEAD:master
-          fi
+          for pkg in linkman linkman-bin; do
+            work="$RUNNER_TEMP/aur-${pkg}"
+            repo="/tmp/aur-${pkg}"
+            git clone "ssh://aur@aur.archlinux.org/${pkg}.git" "$repo"
+            cp "$work/PKGBUILD" "$work/.SRCINFO" "$repo/"
+            cd "$repo"
+            git config user.name "linkman CI"
+            git config user.email "zaidejjo@users.noreply.github.com"
+            git add PKGBUILD .SRCINFO
+            if git diff --cached --quiet; then
+              echo "${pkg} is already up to date for ${version}"
+            else
+              git commit -m "${pkg} ${version}"
+              git push origin HEAD:master
+              echo "pushed ${pkg} ${version}"
+            fi
+            cd -
+          done
