@@ -56,27 +56,30 @@ pub static BLACK: Theme = Theme {
     wordmark_to: (116, 170, 227),
 };
 
+/// The official Mocha palette, wearing Catppuccin's signature mauve instead of
+/// the green it used to lean on. Layers step up from crust to base to surface0
+/// so panels read as depth rather than one flat slab of dark.
 pub static CATPPUCCIN_MOCHA: Theme = Theme {
     name: "catppuccin-mocha",
     aliases: &["catppuccin", "mocha", "catppuccin_mocha"],
-    bg: Color::Rgb(30, 30, 46),
-    surface: Color::Rgb(24, 24, 37),
+    bg: Color::Rgb(17, 17, 27),
+    surface: Color::Rgb(30, 30, 46),
     surface_hi: Color::Rgb(49, 50, 68),
     select_bg: Color::Rgb(69, 71, 90),
     border: Color::Rgb(88, 91, 112),
     border_soft: Color::Rgb(49, 50, 68),
-    mint: Color::Rgb(166, 227, 161),
-    mint_dim: Color::Rgb(64, 160, 43),
+    mint: Color::Rgb(203, 166, 247),
+    mint_dim: Color::Rgb(88, 91, 112),
     amber: Color::Rgb(250, 179, 135),
-    amber_dim: Color::Rgb(254, 100, 11),
+    amber_dim: Color::Rgb(235, 160, 172),
     blue: Color::Rgb(137, 180, 250),
     text: Color::Rgb(205, 214, 244),
-    bright: Color::Rgb(245, 245, 245),
+    bright: Color::Rgb(245, 224, 220),
     muted: Color::Rgb(166, 173, 200),
     faint: Color::Rgb(108, 112, 134),
     danger: Color::Rgb(243, 139, 168),
-    violet: Color::Rgb(203, 166, 247),
-    wordmark_from: (166, 227, 161),
+    violet: Color::Rgb(245, 194, 231),
+    wordmark_from: (203, 166, 247),
     wordmark_to: (137, 180, 250),
 };
 
@@ -240,16 +243,58 @@ pub fn set(name: &str) -> Result<&'static str, String> {
     Ok(theme.name)
 }
 
-/// Switch to the next palette in the list and return its name.
-pub fn cycle() -> &'static str {
-    let mut current = CURRENT.write().unwrap_or_else(|error| error.into_inner());
-    let position = ALL
-        .iter()
-        .position(|theme| std::ptr::eq(*theme, *current))
-        .unwrap_or(0);
-    let next = ALL[(position + 1) % ALL.len()];
-    *current = next;
-    next.name
+/// The floating theme chooser: an index into [`ALL`] plus the palette that was
+/// active when it opened, so Esc can put things back.
+pub struct Picker {
+    index: usize,
+    original: &'static str,
+}
+
+impl Picker {
+    pub fn new() -> Self {
+        let index = ALL
+            .iter()
+            .position(|theme| std::ptr::eq(*theme, current()))
+            .unwrap_or(0);
+        Self {
+            index,
+            original: name(),
+        }
+    }
+
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    pub fn theme(&self) -> &'static Theme {
+        ALL[self.index.min(ALL.len() - 1)]
+    }
+
+    pub fn name(&self) -> &'static str {
+        self.theme().name
+    }
+
+    /// Move the highlight and preview the palette under it immediately.
+    pub fn move_selection(&mut self, delta: isize) {
+        let count = ALL.len() as isize;
+        self.index = (self.index as isize + delta).rem_euclid(count) as usize;
+        let _ = set(self.name());
+    }
+
+    pub fn select(&mut self, index: usize) {
+        self.index = index.min(ALL.len() - 1);
+        let _ = set(self.name());
+    }
+
+    /// Keep the previewed palette.
+    pub fn apply(&self) -> &'static str {
+        set(self.name()).unwrap_or_else(|_| name())
+    }
+
+    /// Put the palette that was active when the picker opened back.
+    pub fn cancel(&self) {
+        let _ = set(self.original);
+    }
 }
 
 pub fn current() -> &'static Theme {
@@ -415,14 +460,31 @@ mod tests {
     }
 
     #[test]
-    fn cycle_walks_every_theme_and_returns_home() {
+    fn picker_previews_wraps_and_reverts() {
         let _guard = LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        set("tokyo-night").unwrap();
+        let mut picker = Picker::new();
+        assert_eq!(picker.name(), "tokyo-night");
+        assert_eq!(picker.original, "tokyo-night");
+
+        picker.move_selection(1);
+        assert_eq!(picker.name(), "dracula");
+        assert_eq!(name(), "dracula");
+
+        // Esc puts the palette that was active before the picker opened back.
+        picker.cancel();
+        assert_eq!(name(), "tokyo-night");
+
+        // The list wraps in both directions.
         set("black").unwrap();
-        let started = name();
-        for _ in 0..ALL.len() {
-            cycle();
-        }
-        assert_eq!(name(), started);
+        let mut picker = Picker::new();
+        picker.move_selection(-1);
+        assert_eq!(picker.index(), ALL.len() - 1);
+        picker.move_selection(1);
+        assert_eq!(picker.index(), 0);
+        picker.select(3);
+        assert_eq!(picker.apply(), ALL[3].name);
+        assert_eq!(name(), ALL[3].name);
         set("black").unwrap();
     }
 

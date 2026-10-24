@@ -9,7 +9,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 
 use super::app::{App, ConfirmState, ConflictState, Mode, PromptKind, PromptState, ToastLevel};
 use super::entry::{Entry, EntryKind};
-use super::palette::PaletteState;
+use super::palette::{PaletteRow, PaletteState};
 use super::theme::{self, *};
 use crate::util;
 
@@ -39,6 +39,7 @@ pub enum ModalAction {
     ConflictChoice(usize),
     CloseHelp,
     PalettePick(usize),
+    ThemePick(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -103,6 +104,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Mode::Confirm(confirm) => draw_confirm(frame, confirm, area, &mut map),
         Mode::Conflict(conflict) => draw_conflict(frame, conflict, area, &mut map),
         Mode::Palette(palette) => draw_palette(frame, palette, area, &mut map),
+        Mode::Themes(picker) => draw_themes(frame, picker, area, &mut map),
     }
 
     app.map = map;
@@ -1299,7 +1301,7 @@ fn draw_conflict(frame: &mut Frame, conflict: &ConflictState, area: Rect, map: &
 // ---------------------------------------------------------------------------
 
 fn draw_palette(frame: &mut Frame, palette: &PaletteState, area: Rect, map: &mut UiMap) {
-    let inner = popup_chrome(frame, area, 88, 19, "Command palette", mint());
+    let inner = popup_chrome(frame, area, 88, 21, "Command palette", mint());
     if inner.height < 6 {
         return;
     }
@@ -1388,70 +1390,107 @@ fn draw_palette(frame: &mut Frame, palette: &PaletteState, area: Rect, map: &mut
             },
         );
     } else {
-        let offset = if palette.selected >= list_height {
-            palette.selected + 1 - list_height
+        let rows = palette.rows();
+        let selected_row = palette.selected_row(&rows);
+        let offset = if selected_row >= list_height {
+            selected_row + 1 - list_height
         } else {
             0
         };
-        // One cursor cell, an 8-cell group chip and a spacer come first; the
-        // rest is split between the title and its description.
-        let available = (inner.width as usize).saturating_sub(10);
-        let title_width = (available * 45 / 100)
-            .clamp(16, 34)
-            .min(available.saturating_sub(12).max(1));
-        let subtitle_width = available.saturating_sub(title_width + 3).max(1);
+        // A cursor cell and the title take the left side; the key and
+        // description sit flush right, unless the terminal is too narrow.
+        let title_area = (inner.width as usize * 58 / 100).clamp(18, 46);
+        let subtitle_start = inner.x + title_area as u16 + 2;
+        let subtitle_width = inner
+            .right()
+            .saturating_sub(2)
+            .saturating_sub(subtitle_start) as usize;
+
         for row in 0..list_height {
-            let position = offset + row;
-            let Some(index) = palette.filtered.get(position) else {
+            let line = offset + row;
+            let Some(entry) = rows.get(line) else {
                 break;
             };
-            let Some(item) = palette.items.get(*index) else {
-                continue;
-            };
-            let selected = position == palette.selected;
-            let group_color = match item.group {
-                "SOURCE" => blue(),
-                "DEST" => amber(),
-                _ => mint(),
-            };
-            let title_style = if selected {
-                Style::default().fg(bright()).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(text_color())
-            };
-            let bar = if selected { ICON_CURSOR } else { " " };
             let rect = Rect {
                 x: inner.x,
                 y: list_y + row as u16,
                 width: inner.width,
                 height: 1,
             };
-            frame.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(
-                        bar,
-                        Style::default().fg(if selected { mint() } else { faint_color() }),
-                    ),
-                    Span::styled(
-                        format!(" {:<6} ", item.group),
-                        Style::default().fg(group_color).bg(surface_hi()),
-                    ),
-                    Span::raw(" "),
-                    Span::styled(util::truncate(&item.title, title_width), title_style),
-                    Span::raw("   "),
-                    Span::styled(
-                        util::truncate(&item.subtitle, subtitle_width),
-                        Style::default().fg(if selected { muted() } else { faint_color() }),
-                    ),
-                ]))
-                .style(Style::default().bg(if selected {
-                    select_bg()
-                } else {
-                    surface_hi()
-                })),
-                rect,
-            );
-            map.modal.push((rect, ModalAction::PalettePick(position)));
+            match entry {
+                PaletteRow::Section { name, count } => {
+                    let color = section_color(name);
+                    frame.render_widget(
+                        Paragraph::new(Line::from(vec![
+                            Span::raw("  "),
+                            Span::styled(
+                                *name,
+                                Style::default().fg(color).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(format!("  {count}"), Style::default().fg(faint_color())),
+                        ]))
+                        .style(Style::default().bg(surface_color())),
+                        rect,
+                    );
+                }
+                PaletteRow::Item(position) => {
+                    let Some(index) = palette.filtered.get(*position) else {
+                        continue;
+                    };
+                    let Some(item) = palette.items.get(*index) else {
+                        continue;
+                    };
+                    let selected = *position == palette.selected;
+                    let row_bg = if selected { select_bg() } else { surface_hi() };
+                    frame
+                        .render_widget(Paragraph::new("").style(Style::default().bg(row_bg)), rect);
+                    frame.render_widget(
+                        Paragraph::new(Line::from(vec![
+                            Span::styled(
+                                if selected { ICON_CURSOR } else { " " },
+                                Style::default()
+                                    .fg(if selected { mint() } else { faint_color() })
+                                    .bg(row_bg),
+                            ),
+                            Span::styled(
+                                util::truncate(&item.title, title_area.saturating_sub(2)),
+                                Style::default()
+                                    .fg(if selected { bright() } else { text_color() })
+                                    .bg(row_bg)
+                                    .add_modifier(if selected {
+                                        Modifier::BOLD
+                                    } else {
+                                        Modifier::empty()
+                                    }),
+                            ),
+                        ])),
+                        Rect {
+                            x: inner.x + 1,
+                            y: rect.y,
+                            width: title_area as u16,
+                            height: 1,
+                        },
+                    );
+                    if subtitle_width >= 6 {
+                        frame.render_widget(
+                            Paragraph::new(Span::styled(
+                                util::truncate(&item.subtitle, subtitle_width),
+                                Style::default()
+                                    .fg(if selected { muted() } else { faint_color() })
+                                    .bg(row_bg),
+                            ))
+                            .alignment(Alignment::Right),
+                            Rect {
+                                x: subtitle_start,
+                                y: rect.y,
+                                width: subtitle_width as u16,
+                                height: 1,
+                            },
+                        );
+                    }
+                    map.modal.push((rect, ModalAction::PalettePick(*position)));
+                }
+            }
         }
     }
 
@@ -1471,6 +1510,147 @@ fn draw_palette(frame: &mut Frame, palette: &PaletteState, area: Rect, map: &mut
             .alignment(Alignment::Right),
         Rect {
             x: inner.x,
+            y: footer_y,
+            width: inner.width.saturating_sub(2),
+            height: 1,
+        },
+    );
+}
+
+/// Heading colours so each section is recognisable at a glance.
+fn section_color(name: &str) -> Color {
+    match name {
+        "LINKS" => mint(),
+        "HISTORY" => violet(),
+        "VIEW" => blue(),
+        "GO" => amber(),
+        "LOOK" => mint_dim(),
+        "APP" => muted(),
+        "SOURCE" => blue(),
+        "DEST" => amber(),
+        _ => mint(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// theme picker
+// ---------------------------------------------------------------------------
+
+fn draw_themes(frame: &mut Frame, picker: &theme::Picker, area: Rect, map: &mut UiMap) {
+    let count = theme::ALL.len() as u16;
+    let inner = popup_chrome(frame, area, 58, count + 6, "Themes", mint());
+    if inner.height < count + 2 || inner.width < 30 {
+        return;
+    }
+
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            "Move to preview, Enter keeps it",
+            Style::default().fg(faint_color()),
+        )),
+        Rect {
+            x: inner.x + 2,
+            y: inner.y,
+            width: inner.width.saturating_sub(4),
+            height: 1,
+        },
+    );
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            "─".repeat(inner.width as usize),
+            Style::default().fg(border()),
+        )),
+        Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: 1,
+        },
+    );
+
+    let list_y = inner.y + 2;
+    for (index, palette) in theme::ALL.iter().enumerate() {
+        let selected = index == picker.index();
+        let row_bg = if selected { select_bg() } else { surface_hi() };
+        let rect = Rect {
+            x: inner.x,
+            y: list_y + index as u16,
+            width: inner.width,
+            height: 1,
+        };
+        frame.render_widget(Paragraph::new("").style(Style::default().bg(row_bg)), rect);
+
+        let mut name_spans = vec![
+            Span::styled(
+                if selected { ICON_CURSOR } else { " " },
+                Style::default()
+                    .fg(if selected { mint() } else { faint_color() })
+                    .bg(row_bg),
+            ),
+            Span::styled(
+                format!(" {}", palette.name),
+                Style::default()
+                    .fg(if selected { bright() } else { text_color() })
+                    .bg(row_bg)
+                    .add_modifier(if selected {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
+            ),
+        ];
+        if palette.name == "black" {
+            name_spans.push(Span::styled(
+                "  default",
+                Style::default().fg(faint_color()).bg(row_bg),
+            ));
+        }
+        frame.render_widget(
+            Paragraph::new(Line::from(name_spans)),
+            Rect {
+                x: inner.x + 1,
+                y: rect.y,
+                width: inner.width.saturating_sub(16),
+                height: 1,
+            },
+        );
+
+        // Each row wears its own palette, so the list doubles as a preview.
+        let swatches: Vec<Span> = [
+            palette.bg,
+            palette.mint,
+            palette.amber,
+            palette.blue,
+            palette.danger,
+        ]
+        .into_iter()
+        .map(|color| Span::styled("  ", Style::default().bg(color)))
+        .collect();
+        frame.render_widget(
+            Paragraph::new(Line::from(swatches)).alignment(Alignment::Right),
+            Rect {
+                x: inner.right().saturating_sub(13),
+                y: rect.y,
+                width: 11,
+                height: 1,
+            },
+        );
+
+        map.modal.push((rect, ModalAction::ThemePick(index)));
+    }
+
+    let footer_y = inner.bottom().saturating_sub(1);
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(" ↑↓", Style::default().fg(amber())),
+            Span::styled(" preview  ", Style::default().fg(faint_color())),
+            Span::styled("Enter", Style::default().fg(amber())),
+            Span::styled(" apply  ", Style::default().fg(faint_color())),
+            Span::styled("Esc", Style::default().fg(amber())),
+            Span::styled(" cancel", Style::default().fg(faint_color())),
+        ])),
+        Rect {
+            x: inner.x + 1,
             y: footer_y,
             width: inner.width.saturating_sub(2),
             height: 1,
@@ -1530,14 +1710,8 @@ fn draw_help(frame: &mut Frame, _app: &App, area: Rect, map: &mut UiMap) {
         ],
     );
     link.extend(section(
-        "SESSION",
-        &[
-            ("1 / 2", "pane"),
-            ("R", "refresh"),
-            ("u / ^Z", "undo"),
-            ("U / ^Y", "redo"),
-            ("q", "quit"),
-        ],
+        "TIPS",
+        &[("^P", "palette"), ("T", "themes"), ("Esc", "clear")],
     ));
     link.pop();
     let mut mouse = section(
@@ -1551,12 +1725,12 @@ fn draw_help(frame: &mut Frame, _app: &App, area: Rect, map: &mut UiMap) {
         ],
     );
     mouse.extend(section(
-        "TIPS",
+        "SESSION",
         &[
-            ("^P", "palette"),
-            ("Esc", "clear"),
-            ("SOURCE", "→ links"),
-            ("DEST", "← created"),
+            ("u / ^Z", "undo"),
+            ("U / ^Y", "redo"),
+            ("R", "refresh"),
+            ("q", "quit"),
         ],
     ));
     mouse.pop();

@@ -72,6 +72,7 @@ pub enum Mode {
     Confirm(ConfirmState),
     Conflict(ConflictState),
     Palette(PaletteState),
+    Themes(theme::Picker),
 }
 
 pub struct Pane {
@@ -803,127 +804,127 @@ impl App {
             PaletteItem::new(
                 "Link selection → DEST",
                 "l · create links from SOURCE",
-                "ACTION",
+                "LINKS",
                 Command(PaletteCommand::Link),
             ),
             PaletteItem::new(
                 "Link with a custom name",
                 "L / n",
-                "ACTION",
+                "LINKS",
                 Command(PaletteCommand::LinkAs),
             ),
             PaletteItem::new(
                 "Retarget DEST link to SOURCE",
                 "t · change where a symlink points",
-                "ACTION",
+                "LINKS",
                 Command(PaletteCommand::Retarget),
             ),
             PaletteItem::new(
                 "Remove symlinks",
                 "x · never touches targets",
-                "ACTION",
+                "LINKS",
                 Command(PaletteCommand::Remove),
             ),
             PaletteItem::new(
                 "Undo last operation",
                 "u / Ctrl+Z · link, retarget or remove",
-                "ACTION",
+                "HISTORY",
                 Command(PaletteCommand::Undo),
             ),
             PaletteItem::new(
                 "Redo undone operation",
                 "U / Ctrl+Y · reapply safely",
-                "ACTION",
+                "HISTORY",
                 Command(PaletteCommand::Redo),
             ),
             PaletteItem::new(
                 "Toggle relative links",
                 format!("r · currently {}", if self.relative { "on" } else { "off" }),
-                "ACTION",
+                "VIEW",
                 Command(PaletteCommand::ToggleRelative),
             ),
             PaletteItem::new(
                 "Toggle force overwrite",
                 format!("f · currently {}", if self.force { "on" } else { "off" }),
-                "ACTION",
+                "VIEW",
                 Command(PaletteCommand::ToggleForce),
             ),
             PaletteItem::new(
                 "Toggle hidden files",
                 ". · show dotfiles",
-                "ACTION",
+                "VIEW",
                 Command(PaletteCommand::ToggleHidden),
             ),
             PaletteItem::new(
                 "Filter names",
                 "/ · narrow the active pane",
-                "ACTION",
+                "VIEW",
                 Command(PaletteCommand::Filter),
+            ),
+            PaletteItem::new(
+                "Refresh panes",
+                "R",
+                "VIEW",
+                Command(PaletteCommand::Refresh),
             ),
             PaletteItem::new(
                 "Jump to path",
                 "Ctrl+L",
-                "ACTION",
+                "GO",
                 Command(PaletteCommand::GoTo),
             ),
             PaletteItem::new(
                 "Open folder",
                 "Enter · selected item",
-                "ACTION",
+                "GO",
                 Command(PaletteCommand::OpenSelected),
             ),
             PaletteItem::new(
                 "Switch pane",
                 "Tab",
-                "ACTION",
+                "GO",
                 Command(PaletteCommand::SwitchPane),
             ),
             PaletteItem::new(
                 "Mark / unmark",
                 "Space",
-                "ACTION",
+                "GO",
                 Command(PaletteCommand::Mark),
             ),
             PaletteItem::new(
                 "Mark all items",
                 "a",
-                "ACTION",
+                "GO",
                 Command(PaletteCommand::MarkAll),
             ),
             PaletteItem::new(
                 "Clear marks",
                 "c / Esc",
-                "ACTION",
+                "GO",
                 Command(PaletteCommand::ClearMarks),
             ),
             PaletteItem::new(
                 "Go home",
                 "~ · active pane",
-                "ACTION",
+                "GO",
                 Command(PaletteCommand::Home),
             ),
             PaletteItem::new(
-                "Refresh panes",
-                "R",
-                "ACTION",
-                Command(PaletteCommand::Refresh),
-            ),
-            PaletteItem::new(
-                "Next theme",
-                format!("palette · currently {}", theme::name()),
+                "Choose theme",
+                format!("T · currently {}", theme::name()),
                 "LOOK",
-                Command(PaletteCommand::CycleTheme),
+                Command(PaletteCommand::Theme),
             ),
             PaletteItem::new(
                 "Show keys & shortcuts",
                 "?",
-                "ACTION",
+                "APP",
                 Command(PaletteCommand::Help),
             ),
             PaletteItem::new(
                 "Quit linkman",
                 "q / Ctrl+C",
-                "ACTION",
+                "APP",
                 Command(PaletteCommand::Quit),
             ),
         ];
@@ -955,9 +956,39 @@ impl App {
         items
     }
 
-    fn cycle_theme(&mut self) {
-        let name = theme::cycle();
-        self.set_toast(ToastLevel::Info, format!("theme · {name}"));
+    fn open_theme_picker(&mut self) {
+        self.mode = Mode::Themes(theme::Picker::new());
+    }
+
+    fn handle_theme_key(&mut self, key: KeyEvent) {
+        let Mode::Themes(picker) = &mut self.mode else {
+            return;
+        };
+        match key.code {
+            KeyCode::Enter => {
+                let name = picker.apply();
+                self.mode = Mode::Normal;
+                self.set_toast(ToastLevel::Info, format!("theme · {name}"));
+            }
+            KeyCode::Esc | KeyCode::Char('q') => {
+                picker.cancel();
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Up | KeyCode::Char('k') => picker.move_selection(-1),
+            KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => picker.move_selection(1),
+            KeyCode::Home | KeyCode::Char('g') => picker.select(0),
+            KeyCode::End | KeyCode::Char('G') => picker.select(theme::ALL.len() - 1),
+            _ => {}
+        }
+    }
+
+    fn pick_theme(&mut self, index: usize) {
+        if let Mode::Themes(picker) = &mut self.mode {
+            picker.select(index);
+            let name = picker.apply();
+            self.mode = Mode::Normal;
+            self.set_toast(ToastLevel::Info, format!("theme · {name}"));
+        }
     }
 
     fn open_palette(&mut self) {
@@ -1079,7 +1110,7 @@ impl App {
             PaletteCommand::Remove => self.confirm_remove(),
             PaletteCommand::Undo => self.undo_last(),
             PaletteCommand::Redo => self.redo_last(),
-            PaletteCommand::CycleTheme => self.cycle_theme(),
+            PaletteCommand::Theme => self.open_theme_picker(),
             PaletteCommand::ToggleRelative => self.toolbar_action(ToolbarAction::ToggleRelative),
             PaletteCommand::ToggleForce => self.toolbar_action(ToolbarAction::ToggleForce),
             PaletteCommand::ToggleHidden => self.toolbar_action(ToolbarAction::ToggleHidden),
@@ -1316,7 +1347,7 @@ impl App {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('p') {
             if matches!(
                 self.mode,
-                Mode::Prompt(_) | Mode::Confirm(_) | Mode::Conflict(_)
+                Mode::Prompt(_) | Mode::Confirm(_) | Mode::Conflict(_) | Mode::Themes(_)
             ) {
                 return Ok(());
             }
@@ -1347,6 +1378,10 @@ impl App {
             }
             Mode::Palette(_) => {
                 self.handle_palette_key(key);
+                return Ok(());
+            }
+            Mode::Themes(_) => {
+                self.handle_theme_key(key);
                 return Ok(());
             }
             Mode::Normal => {}
@@ -1431,6 +1466,7 @@ impl App {
             KeyCode::Char('U') => self.redo_last(),
             KeyCode::Char('/') => self.open_prompt(PromptKind::Filter(self.active)),
             KeyCode::Char('~') => self.go_home(),
+            KeyCode::Char('T') => self.open_theme_picker(),
             KeyCode::Char('1') => self.active = 0,
             KeyCode::Char('2') => self.active = 1,
             KeyCode::Esc => self.escape(),
@@ -1478,15 +1514,15 @@ impl App {
                     }
                 }
                 MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
-                    if matches!(self.mode, Mode::Palette(_)) {
-                        let delta = if mouse.kind == MouseEventKind::ScrollUp {
-                            -3
-                        } else {
-                            3
-                        };
-                        if let Mode::Palette(state) = &mut self.mode {
-                            state.move_selection(delta);
-                        }
+                    let delta = if mouse.kind == MouseEventKind::ScrollUp {
+                        -3
+                    } else {
+                        3
+                    };
+                    match &mut self.mode {
+                        Mode::Palette(state) => state.move_selection(delta),
+                        Mode::Themes(picker) => picker.move_selection(delta),
+                        _ => {}
                     }
                 }
                 _ => {}
@@ -1608,6 +1644,7 @@ impl App {
             ModalAction::ConflictChoice(choice) => self.resolve_conflict(choice),
             ModalAction::CloseHelp => self.mode = Mode::Normal,
             ModalAction::PalettePick(index) => self.pick_palette_index(Some(index)),
+            ModalAction::ThemePick(index) => self.pick_theme(index),
         }
     }
 
@@ -1665,6 +1702,11 @@ impl App {
                 ("↑↓".into(), "move".into()),
                 ("Enter".into(), "run".into()),
                 ("Esc".into(), "close".into()),
+            ],
+            Mode::Themes(_) => vec![
+                ("↑↓".into(), "preview".into()),
+                ("Enter".into(), "apply".into()),
+                ("Esc".into(), "cancel".into()),
             ],
         }
     }

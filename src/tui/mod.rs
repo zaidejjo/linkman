@@ -37,6 +37,19 @@ pub fn run(dir: Option<PathBuf>, dest: Option<PathBuf>) -> Result<()> {
     let cfg = loaded.config.clone();
     let cwd = std::env::current_dir()?;
     let mut warning = loaded.warning.clone();
+    let mut created: Option<PathBuf> = None;
+    if loaded.path.is_none() {
+        match crate::config::ensure_default() {
+            Ok(path) => created = path,
+            Err(err) => {
+                let message = format!("cannot create config: {err}");
+                warning = Some(match warning {
+                    Some(previous) => format!("{previous} · {message}"),
+                    None => message,
+                });
+            }
+        }
+    }
 
     if let Err(err) = theme::set(&cfg.theme) {
         warning = Some(match warning {
@@ -67,6 +80,12 @@ pub fn run(dir: Option<PathBuf>, dest: Option<PathBuf>) -> Result<()> {
     let mut app = App::new(source, dest, &cfg);
     if let Some(warning) = warning {
         app.set_toast(ToastLevel::Error, warning);
+    }
+    if let Some(path) = created {
+        app.set_toast(
+            ToastLevel::Info,
+            format!("created {}", crate::util::tildify(&path)),
+        );
     }
 
     let original_hook = panic::take_hook();

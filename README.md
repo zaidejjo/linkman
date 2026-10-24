@@ -77,17 +77,21 @@ removed with `x` (never the file they point at).
 
 ### Find anything with Ctrl+P
 
-Press `Ctrl+P` outside a prompt, confirmation or conflict dialog to open a
+Press `Ctrl+P` outside a prompt, confirmation or theme picker to open a
 floating fuzzy finder. It searches every action **and every file or folder in
-both panes**. Type fragments of a name, a path, or an action description:
+both panes**. Results are grouped under section headings — `LINKS`,
+`HISTORY`, `VIEW`, `GO`, `LOOK`, `APP`, then `SOURCE` and `DEST` files — and
+sections are ordered by their best match, so a strong hit still comes first.
+Type fragments of a name, a path, or an action description:
 
 ```text
 ╭ Command palette ─────────────────────────────────────────╮
-│  ⌕  note                                       10 results │
+│  ⌕  note                                       10 results│
 │──────────────────────────────────────────────────────────│
-│▌SOURCE  notes.md   SOURCE · ~/projects/notes.md          │
-│  SOURCE  notes-link   SOURCE · ~/projects/notes-link     │
-│  ACTION  Filter names   / · narrow the active pane        │
+│  LINKS  3                                                │
+│  Remove symlinks                        x · targets stay…│
+│  SOURCE  2                                               │
+│▌ notes.md                           SOURCE · ~/projects/…│
 ╰──────────────────────────────────────────────────────────╯
 ```
 
@@ -132,6 +136,7 @@ the config (default 50).
 | `g` / `G`, `Home` / `End` | top / bottom |
 | `PgUp` / `PgDn`, `Ctrl+U` / `Ctrl+D` | page |
 | `Ctrl+P` | fuzzy command palette |
+| `T` | choose a theme (live preview) |
 | `Ctrl+L` | jump to a path |
 | `~` | home folder |
 | `/` | filter by name |
@@ -261,8 +266,10 @@ trailing commas are fine):
 }
 ```
 
-Create one with `linkman config --init`, then edit it. Nothing is created
-automatically. Unknown keys and syntax errors are reported as a warning rather
+Create one with `linkman config --init`, or just start the TUI: the first
+launch creates `~/.config/linkman/config.jsonc` for you (and the status line
+says so). An existing file is never overwritten or rewritten — edit it by hand.
+Unknown keys and syntax errors are reported as a warning rather
 than stopping the TUI. Config preferences apply to the TUI; explicit CLI flags
 remain in charge of CLI operations.
 
@@ -274,22 +281,25 @@ with mint highlights and amber links.
 | Name | Look |
 | --- | --- |
 | `black` | deep slate + mint · default |
-| `catppuccin-mocha` | soft pastel dark |
+| `catppuccin-mocha` | mauve pastels on deep indigo |
 | `tokyo-night` | blue-violet night |
 | `dracula` | purple night with vivid green |
 | `gruvbox` | warm retro brown |
 | `everforest` | muted forest green |
 | `github-light` | clean light theme for bright terminals |
 
-Pick one in the config:
+Press `T` (or open the palette with `Ctrl+P` and pick “Choose theme”) to see
+the whole list in a floating picker. Each row wears its own colours; moving the
+cursor previews that palette live across the whole TUI. `Enter` keeps it and
+`Esc` restores the one you had. The choice lasts for the session — put the name
+in the config to make it permanent:
 
 ```jsonc
 { "theme": "tokyo-night" }
 ```
 
-or cycle them live from the palette (`Ctrl+P` → “Next theme”). Aliases such as
-`mocha`, `tokyonight`, `light` and `default` also work. An unknown name falls
-back to `black` with a warning in the status line.
+Aliases such as `mocha`, `tokyonight`, `light` and `default` also work. An
+unknown name falls back to `black` with a warning in the status line.
 
 ## Shell completions
 

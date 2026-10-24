@@ -59,7 +59,8 @@ impl Config {
   "undo_limit": 50,
 
   // Palette: black (default), catppuccin-mocha, tokyo-night, dracula,
-  // gruvbox, everforest or github-light. Ctrl+P can cycle them too.
+  // gruvbox, everforest or github-light. Press T in the TUI to preview and
+  // choose one.
   "theme": "black",
 
   // Optional starting folders. CLI arguments always take precedence.
@@ -268,9 +269,52 @@ pub fn write_sample(path: &Path) -> std::io::Result<()> {
     fs::write(path, Config::SAMPLE)
 }
 
+/// Write the starter config at `path` unless something is already there.
+/// Returns the path that was created, or `None` when nothing had to be done.
+pub fn ensure_sample(path: &Path) -> std::io::Result<Option<PathBuf>> {
+    if path.exists() {
+        return Ok(None);
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, Config::SAMPLE)?;
+    Ok(Some(path.to_path_buf()))
+}
+
+/// Called when the TUI starts with no config at all: create
+/// `~/.config/linkman/config.jsonc` (or `$LINKMAN_CONFIG`) so the user has
+/// something to edit. Returns the path created, or `None` if a config already
+/// exists — an existing file is never touched.
+pub fn ensure_default() -> std::io::Result<Option<PathBuf>> {
+    if candidates().iter().any(|path| path.is_file()) {
+        return Ok(None);
+    }
+    let Some(path) = default_path() else {
+        return Ok(None);
+    };
+    ensure_sample(&path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn creates_the_starter_config_only_when_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("linkman").join("config.jsonc");
+
+        let created = ensure_sample(&path).unwrap();
+        assert_eq!(created.as_deref(), Some(path.as_path()));
+        assert_eq!(fs::read_to_string(&path).unwrap(), Config::SAMPLE);
+
+        // Whatever is already there wins — even a file that is not ours.
+        fs::write(&path, "{\"relative\": true}").unwrap();
+        assert!(ensure_sample(&path).unwrap().is_none());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{\"relative\": true}");
+        assert!(ensure_sample(&path).unwrap().is_none());
+    }
 
     #[test]
     fn parses_jsonc_with_comments_and_trailing_commas() {

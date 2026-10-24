@@ -17,7 +17,7 @@ pub enum PaletteCommand {
     Remove,
     Undo,
     Redo,
-    CycleTheme,
+    Theme,
     ToggleRelative,
     ToggleForce,
     ToggleHidden,
@@ -76,6 +76,17 @@ impl PaletteItem {
     }
 }
 
+/// One line in the palette list: a section heading or a result under it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaletteRow {
+    Section {
+        name: &'static str,
+        count: usize,
+    },
+    /// An index into [`PaletteState::filtered`].
+    Item(usize),
+}
+
 pub struct PaletteState {
     pub input: TextInput,
     pub items: Vec<PaletteItem>,
@@ -120,6 +131,47 @@ impl PaletteState {
         });
         self.filtered = scored.into_iter().map(|(_, index)| index).collect();
         self.selected = 0;
+    }
+
+    /// Group the current results into sections. Results keep their relevance
+    /// order inside a section, and sections appear in the order of their best
+    /// match, so a strong title match still floats to the top.
+    pub fn rows(&self) -> Vec<PaletteRow> {
+        let mut names: Vec<&'static str> = Vec::new();
+        let mut buckets: Vec<Vec<usize>> = Vec::new();
+        for (position, index) in self.filtered.iter().enumerate() {
+            let Some(item) = self.items.get(*index) else {
+                continue;
+            };
+            match names.iter().position(|name| *name == item.group) {
+                Some(slot) => buckets[slot].push(position),
+                None => {
+                    names.push(item.group);
+                    buckets.push(vec![position]);
+                }
+            }
+        }
+
+        let mut rows = Vec::with_capacity(self.filtered.len() + names.len());
+        for (slot, name) in names.into_iter().enumerate() {
+            rows.push(PaletteRow::Section {
+                name,
+                count: buckets[slot].len(),
+            });
+            rows.extend(
+                buckets[slot]
+                    .iter()
+                    .map(|position| PaletteRow::Item(*position)),
+            );
+        }
+        rows
+    }
+
+    /// Row index of the highlighted result inside [`Self::rows`].
+    pub fn selected_row(&self, rows: &[PaletteRow]) -> usize {
+        rows.iter()
+            .position(|row| *row == PaletteRow::Item(self.selected))
+            .unwrap_or(0)
     }
 
     pub fn move_selection(&mut self, delta: isize) {
@@ -356,10 +408,10 @@ mod tests {
         assert!(fuzzy_score("notes app", "/home/me/notes.md /tmp/app").is_some());
         assert!(fuzzy_score("notes nope", "/home/me/notes.md /tmp/app").is_none());
         let themed = item(
-            "Next theme",
-            "palette · currently black",
+            "Choose theme",
+            "T · currently black",
             "LOOK",
-            PaletteCommand::CycleTheme,
+            PaletteCommand::Theme,
         );
         assert!(score_item("theme black", &themed).is_some());
         assert!(score_item("theme nope", &themed).is_none());
@@ -391,6 +443,55 @@ mod tests {
         assert_eq!(state.filtered.len(), 3);
         state.move_selection(10);
         assert_eq!(state.selected, 2);
+    }
+
+    #[test]
+    fn rows_group_results_under_section_headings() {
+        let items = vec![
+            item("Link selected", "l", "LINKS", PaletteCommand::Link),
+            item("Undo last operation", "u", "HISTORY", PaletteCommand::Undo),
+            item("Remove symlinks", "x", "LINKS", PaletteCommand::Remove),
+            item("Quit linkman", "q", "APP", PaletteCommand::Quit),
+        ];
+        let mut state = PaletteState::new(items);
+        assert_eq!(
+            state.rows(),
+            vec![
+                PaletteRow::Section {
+                    name: "LINKS",
+                    count: 2
+                },
+                PaletteRow::Item(0),
+                PaletteRow::Item(2),
+                PaletteRow::Section {
+                    name: "HISTORY",
+                    count: 1
+                },
+                PaletteRow::Item(1),
+                PaletteRow::Section {
+                    name: "APP",
+                    count: 1
+                },
+                PaletteRow::Item(3),
+            ]
+        );
+
+        // Headings describe the filtered list, and the selected result can be
+        // found among the rows even after a query reshuffles the order.
+        state.input.insert_str("remove");
+        state.refilter();
+        let rows = state.rows();
+        assert_eq!(
+            rows,
+            vec![
+                PaletteRow::Section {
+                    name: "LINKS",
+                    count: 1
+                },
+                PaletteRow::Item(0),
+            ]
+        );
+        assert_eq!(state.selected_row(&rows), 1);
     }
 
     #[test]
