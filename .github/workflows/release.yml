@@ -211,27 +211,51 @@ jobs:
     steps:
       - name: Install tools
         run: |
-          pacman -Syu --noconfirm git openssh curl
+          pacman -Syu --noconfirm git openssh curl jq
           useradd -m builder
 
       - uses: actions/checkout@v4
 
-      - name: Both AUR packages must exist (create them once on the AUR website)
+      # AUR packages can only be created by hand (aurweb has no API for it), so a
+      # missing package is a one-time setup step, not a build failure: publish to
+      # whichever packages exist and explain the rest without going red.
+      - name: Work out which AUR packages exist
         run: |
           info="$(curl -fsSL 'https://aur.archlinux.org/rpc/v5/info?arg[]=linkman&arg[]=linkman-bin')"
+          present=()
           for pkg in linkman linkman-bin; do
-            case "$info" in
-              *"\"name\":\"$pkg\""*)
-                echo "${pkg} is on the AUR"
-                ;;
-              *)
-                echo "::error::AUR package '${pkg}' does not exist yet. Create it once at https://aur.archlinux.org/packages/${pkg}/ (submit an empty package), then re-run this job."
-                exit 1
-                ;;
-            esac
+            if printf '%s' "$info" | jq -e --arg p "$pkg" 'any(.results[]; .Name == $p)' >/dev/null; then
+              present+=("$pkg")
+              echo "${pkg} is on the AUR"
+            else
+              echo "::warning::AUR package '${pkg}' does not exist yet — create it once at https://aur.archlinux.org/packages/${pkg}/ and the next release publishes to it."
+            fi
           done
+          echo "AUR_PACKAGES=${present[*]}" >> "$GITHUB_ENV"
+          echo "Found: ${present[*]:-(none)}"
+          if [ "${#present[@]}" -eq 0 ]; then
+            echo "AUR_PUBLISH=0" >> "$GITHUB_ENV"
+            {
+              echo "## AUR: nothing published yet"
+              echo
+              echo "Neither \`linkman\` nor \`linkman-bin\` exists on the AUR, so there is nothing to push to."
+              echo "Both install the same prebuilt release and conflict with each other, so one is enough."
+              echo "Submit either empty package once, then re-run this job:"
+              echo
+              echo "- https://aur.archlinux.org/packages/linkman/"
+              echo "- https://aur.archlinux.org/packages/linkman-bin/"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "AUR_PUBLISH=1" >> "$GITHUB_ENV"
+          fi
+
+      - name: No AUR package exists yet
+        if: env.AUR_PUBLISH != '1'
+        run: |
+          echo "Skipping the AUR — create the package once on the website, then re-run this job."
 
       - name: Download the released tarball and hash it
+        if: env.AUR_PUBLISH == '1'
         run: |
           version="${GITHUB_REF_NAME#v}"
           curl -fsSL -o /tmp/linkman.tar.gz \
@@ -239,9 +263,10 @@ jobs:
           echo "PKG_SHA256=$(sha256sum /tmp/linkman.tar.gz | cut -d' ' -f1)" >> "$GITHUB_ENV"
 
       - name: Render the PKGBUILDs
+        if: env.AUR_PUBLISH == '1'
         run: |
           version="${GITHUB_REF_NAME#v}"
-          for pkg in linkman linkman-bin; do
+          for pkg in $AUR_PACKAGES; do
             work="$RUNNER_TEMP/aur-${pkg}"
             mkdir -p "$work"
             sed -e "s|@VERSION@|${version}|g" \
@@ -255,6 +280,7 @@ jobs:
           done
 
       - name: Push to the AUR
+        if: env.AUR_PUBLISH == '1'
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
@@ -269,7 +295,7 @@ jobs:
           ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
-          for pkg in linkman linkman-bin; do
+          for pkg in $AUR_PACKAGES; do
             work="$RUNNER_TEMP/aur-${pkg}"
             repo="/tmp/aur-${pkg}"
             git clone "ssh://aur@aur.archlinux.org/${pkg}.git" "$repo"
@@ -287,3 +313,27 @@ jobs:
             fi
             cd -
           done
+
+      # The AUR index updates a little after the push, so poll before believing it.
+      - name: Verify the AUR serves the new version
+        if: env.AUR_PUBLISH == '1'
+        run: |
+          version="${GITHUB_REF_NAME#v}-1"
+          failures=0
+          for pkg in $AUR_PACKAGES; do
+            got=""
+            for attempt in $(seq 1 12); do
+              got="$(curl -fsSL "https://aur.archlinux.org/rpc/v5/info?arg[]=${pkg}" \
+                | jq -r --arg p "$pkg" '.results[] | select(.Name == $p) | .Version' || true)"
+              if [ "$got" = "$version" ]; then
+                echo "${pkg} is published at ${got}"
+                break
+              fi
+              sleep 5
+            done
+            if [ "$got" != "$version" ]; then
+              echo "::error::${pkg} reports '${got:-nothing}' on the AUR, expected '${version}'"
+              failures=$((failures + 1))
+            fi
+          done
+          [ "$failures" -eq 0 ]
