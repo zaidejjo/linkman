@@ -275,11 +275,24 @@ jobs:
             echo "::error::AUR_SSH_PRIVATE_KEY is not set, so there is no way to authenticate to the AUR."
             exit 1
           fi
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%b\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
-          chmod 644 ~/.ssh/known_hosts
+          mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+          printf '%b\n' "$AUR_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+
+          # A container job runs `run:` blocks under `sh -e`, so ssh cannot stop to
+          # ask about an unknown host key, and the image ships no known_hosts.
+          # Pin the key and accept the host key on first use instead of relying on
+          # `ssh-keyscan`, which produced nothing git's ssh would accept here.
+          ssh_opts="-i $HOME/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes"
+          ssh_opts="$ssh_opts -o StrictHostKeyChecking=accept-new"
+          ssh_opts="$ssh_opts -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
+          export GIT_SSH_COMMAND="ssh $ssh_opts"
+
+          # Say out loud whether the key is registered before anything else runs:
+          # aurweb greets a known key and refuses an unknown one, so this turns a
+          # cryptic "Could not read from remote repository" into a real answer.
+          echo "--- what the AUR says about this key:"
+          ssh $ssh_opts -T aur@aur.archlinux.org 2>&1 | sed 's/^/    /' || true
 
           for pkg in linkman linkman-bin; do
             work="$RUNNER_TEMP/aur-${pkg}"
@@ -287,7 +300,10 @@ jobs:
             rm -rf "$repo"
             # An empty clone is the normal case for a name that does not exist
             # yet — the push below creates it.
-            git clone "ssh://aur@aur.archlinux.org/${pkg}" "$repo"
+            git clone "ssh://aur@aur.archlinux.org/${pkg}" "$repo" || {
+              echo "::error::Could not authenticate to the AUR as ${pkg}. The greeting above says why: 'Welcome to AUR' means the key works, 'Permission denied (publickey)' means the public half is not on your AUR account, and a 'not verified' message means the account's email is unconfirmed."
+              exit 1
+            }
             cp "$work/PKGBUILD" "$work/.SRCINFO" "$repo/"
             cd "$repo"
             git config user.name "linkman CI"
