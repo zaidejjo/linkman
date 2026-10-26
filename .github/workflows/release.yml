@@ -219,77 +219,60 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      # AUR packages can only be created by hand (aurweb has no API for it), so a
-      # missing package is a one-time setup step, not a build failure: publish to
-      # whichever packages exist and explain the rest without going red.
-      - name: Work out which AUR packages exist
-        run: |
-          info="$(curl -fsSL 'https://aur.archlinux.org/rpc/v5/info?arg[]=linkman&arg[]=linkman-bin')"
-          present=()
-          for pkg in linkman linkman-bin; do
-            if printf '%s' "$info" | jq -e --arg p "$pkg" 'any(.results[]; .Name == $p)' >/dev/null; then
-              present+=("$pkg")
-              echo "${pkg} is on the AUR"
-            else
-              echo "::warning::AUR package '${pkg}' does not exist yet — create it once at https://aur.archlinux.org/packages/${pkg}/ and the next release publishes to it."
-            fi
-          done
-          echo "AUR_PACKAGES=${present[*]}" >> "$GITHUB_ENV"
-          echo "Found: ${present[*]:-(none)}"
-          if [ "${#present[@]}" -eq 0 ]; then
-            echo "AUR_PUBLISH=0" >> "$GITHUB_ENV"
-            {
-              echo "## AUR: nothing published yet"
-              echo
-              echo "Neither \`linkman\` nor \`linkman-bin\` exists on the AUR, so there is nothing to push to."
-              echo "Both install the same prebuilt release and conflict with each other, so one is enough."
-              echo "Submit either empty package once, then re-run this job:"
-              echo
-              echo "- https://aur.archlinux.org/packages/linkman/"
-              echo "- https://aur.archlinux.org/packages/linkman-bin/"
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "AUR_PUBLISH=1" >> "$GITHUB_ENV"
-          fi
-
-      - name: No AUR package exists yet
-        if: env.AUR_PUBLISH != '1'
-        run: |
-          echo "Skipping the AUR — create the package once on the website, then re-run this job."
-
-      - name: Download the released tarball and hash it
-        if: env.AUR_PUBLISH == '1'
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          curl -fsSL -o /tmp/linkman.tar.gz \
-            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/linkman-${version}-x86_64-unknown-linux-gnu.tar.gz"
-          echo "PKG_SHA256=$(sha256sum /tmp/linkman.tar.gz | cut -d' ' -f1)" >> "$GITHUB_ENV"
-
+      # A push creates the package: aurweb's update hook calls create_pkgbase()
+      # when the pushed pkgbase has no row yet (see aurweb/git/update.py), and
+      # serve.py only checks ownership for pkgbases that already exist. So there
+      # is no "submit it on the website first" step — pushing PKGBUILD +
+      # .SRCINFO is the whole submission, and updating later is the same push.
+      #
+      # The catch is the account, not the code: the key in AUR_SSH_PRIVATE_KEY
+      # must be registered on the AUR account, and that account's email must be
+      # verified — aurweb refuses every mutating action otherwise.
+      #
+      # `linkman` builds from the release tag's source (the AUR requires a
+      # non -bin name to build from source); `linkman-bin` installs the prebuilt
+      # tarball. Both install the same program and conflict with each other.
       - name: Render the PKGBUILDs
-        if: env.AUR_PUBLISH == '1'
         run: |
           version="${GITHUB_REF_NAME#v}"
-          for pkg in $AUR_PACKAGES; do
+          base="https://github.com/${GITHUB_REPOSITORY}"
+          curl -fsSL -o /tmp/source.tar.gz \
+            "${base}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          curl -fsSL -o /tmp/binary.tar.gz \
+            "${base}/releases/download/${GITHUB_REF_NAME}/linkman-${version}-x86_64-unknown-linux-gnu.tar.gz"
+          source_sha="$(sha256sum /tmp/source.tar.gz | cut -d' ' -f1)"
+          binary_sha="$(sha256sum /tmp/binary.tar.gz | cut -d' ' -f1)"
+          echo "source sha256: ${source_sha}"
+          echo "binary sha256: ${binary_sha}"
+          for pkg in linkman linkman-bin; do
             work="$RUNNER_TEMP/aur-${pkg}"
             mkdir -p "$work"
             sed -e "s|@VERSION@|${version}|g" \
-                -e "s|@SHA256@|${PKG_SHA256}|g" \
+                -e "s|@SOURCE_SHA256@|${source_sha}|g" \
+                -e "s|@BINARY_SHA256@|${binary_sha}|g" \
                 -e "s|@REPO@|${GITHUB_REPOSITORY}|g" \
                 "packaging/aur/${pkg}/PKGBUILD" > "$work/PKGBUILD"
+            echo "=== ${pkg}"
+            cat "$work/PKGBUILD"
+          done
+
+      - name: Generate .SRCINFO
+        run: |
+          for pkg in linkman linkman-bin; do
+            work="$RUNNER_TEMP/aur-${pkg}"
             chown -R builder:builder "$work"
             su -s /bin/bash builder -c "cd '$work' && makepkg --printsrcinfo > .SRCINFO"
-            echo "=== ${pkg}"
-            cat "$work/PKGBUILD" "$work/.SRCINFO"
+            echo "=== ${pkg}/.SRCINFO"
+            cat "$work/.SRCINFO"
           done
 
       - name: Push to the AUR
-        if: env.AUR_PUBLISH == '1'
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
           version="${GITHUB_REF_NAME#v}"
           if [ -z "$AUR_SSH_PRIVATE_KEY" ]; then
-            echo "::error::AUR_SSH_PRIVATE_KEY is not set"
+            echo "::error::AUR_SSH_PRIVATE_KEY is not set, so there is no way to authenticate to the AUR."
             exit 1
           fi
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -298,14 +281,18 @@ jobs:
           ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
-          for pkg in $AUR_PACKAGES; do
+          for pkg in linkman linkman-bin; do
             work="$RUNNER_TEMP/aur-${pkg}"
             repo="/tmp/aur-${pkg}"
-            git clone "ssh://aur@aur.archlinux.org/${pkg}.git" "$repo"
+            rm -rf "$repo"
+            # An empty clone is the normal case for a name that does not exist
+            # yet — the push below creates it.
+            git clone "ssh://aur@aur.archlinux.org/${pkg}" "$repo"
             cp "$work/PKGBUILD" "$work/.SRCINFO" "$repo/"
             cd "$repo"
             git config user.name "linkman CI"
             git config user.email "zaidejjo@users.noreply.github.com"
+            git checkout -q -B master
             git add PKGBUILD .SRCINFO
             if git diff --cached --quiet; then
               echo "${pkg} is already up to date for ${version}"
@@ -319,11 +306,10 @@ jobs:
 
       # The AUR index updates a little after the push, so poll before believing it.
       - name: Verify the AUR serves the new version
-        if: env.AUR_PUBLISH == '1'
         run: |
           version="${GITHUB_REF_NAME#v}-1"
           failures=0
-          for pkg in $AUR_PACKAGES; do
+          for pkg in linkman linkman-bin; do
             got=""
             for attempt in $(seq 1 12); do
               got="$(curl -fsSL "https://aur.archlinux.org/rpc/v5/info?arg[]=${pkg}" \

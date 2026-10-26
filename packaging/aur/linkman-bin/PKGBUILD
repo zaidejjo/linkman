@@ -10,7 +10,7 @@ license=('MIT')
 provides=('linkman')
 conflicts=('linkman')
 source=("${pkgname}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/linkman-${pkgver}-x86_64-unknown-linux-gnu.tar.gz")
-sha256sums=('@SHA256@')
+sha256sums=('@BINARY_SHA256@')
 
 package() {
   cd "linkman-${pkgver}-x86_64-unknown-linux-gnu"

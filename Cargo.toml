@@ -1,6 +1,6 @@
 [package]
 name = "linkman"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "A fast, beautiful TUI + CLI for creating and managing symlinks"
 license = "MIT"
